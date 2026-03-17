@@ -42,6 +42,6 @@ async def monitor_light():
                     previous_color = color
                     previous_last_changed = last_changed
         
-        await asyncio.sleep(1)  # Poll every 5 seconds
+        await asyncio.sleep(1)  # Poll every 1 second
 
 asyncio.run(monitor_light())
