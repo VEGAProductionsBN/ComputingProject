@@ -1,10 +1,26 @@
 import asyncio
 import aiohttp
 import json
+import datetime
+import os
 
 HA_URL = "http://homeassistant.local:8123"
 TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiI1ZTYxYzgwODY5NjY0ZjZkODQ1YjY5NTZkZWRiMDI2YiIsImlhdCI6MTc3MzMyMTQ4MCwiZXhwIjoyMDg4NjgxNDgwfQ.QPcRgynFSwWlpP0t1HuHg-nECBoyfA43-bGYCzepm2A"
-ENTITY_ID = "light.eveready_rgbcct_led_bc_gls"
+LIGHT_ENTITY_ID = "light.eveready_rgbcct_led_bc_gls"
+FLIC_ENTITY_ID = "binary_sensor.flic_80e4da79f712"
+LOG_DIR = "home_assistant_logs"
+
+# Create logs directory if it doesn't exist
+os.makedirs(LOG_DIR, exist_ok=True)
+
+# Generate session filename based on current timestamp
+session_start = datetime.datetime.now()
+LOG_FILE = os.path.join(LOG_DIR, f"session_{session_start.strftime('%Y%m%d_%H%M%S')}.jsonl")
+
+def save_to_file(data):
+    with open(LOG_FILE, 'a') as f:
+        json.dump(data, f)
+        f.write('\n')
 
 async def monitor_light():
     previous_brightness = None
@@ -17,7 +33,7 @@ async def monitor_light():
             "Content-Type": "application/json",
         }
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"{HA_URL}/api/states/{ENTITY_ID}", headers=headers) as resp:
+            async with session.get(f"{HA_URL}/api/states/{LIGHT_ENTITY_ID}", headers=headers) as resp:
                 data = await resp.json()
                 attributes = data.get('attributes', {})
                 brightness = attributes.get('brightness')
@@ -33,6 +49,15 @@ async def monitor_light():
                 last_changed = data.get('last_changed')
                 
                 if brightness != previous_brightness or color != previous_color or last_changed != previous_last_changed:
+                    event_data = {
+                        "timestamp": datetime.datetime.now().isoformat(),
+                        "type": "light_change",
+                        "brightness": brightness,
+                        "color": color,
+                        "last_changed": last_changed
+                    }
+                    save_to_file(event_data)
+                    
                     print(f"Brightness: {brightness}")
                     print(f"Colour: {color}")
                     print(f"Time changed: {last_changed}")
@@ -42,6 +67,49 @@ async def monitor_light():
                     previous_color = color
                     previous_last_changed = last_changed
         
-        await asyncio.sleep(1)  # Poll every 5 seconds
+        await asyncio.sleep(1)  # Poll every 1 second
 
-asyncio.run(monitor_light())
+async def monitor_flic():
+    previous_state = None
+    previous_last_changed = None
+
+    while True:
+        headers = {
+            "Authorization": f"Bearer {TOKEN}",
+            "Content-Type": "application/json",
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{HA_URL}/api/states/{FLIC_ENTITY_ID}", headers=headers) as resp:
+                data = await resp.json()
+                state = data.get('state')
+                last_changed = data.get('last_changed')
+                attributes = data.get('attributes', {})
+                
+                if state != previous_state or last_changed != previous_last_changed:
+                    event_data = {
+                        "timestamp": datetime.datetime.now().isoformat(),
+                        "type": "flic_press",
+                        "state": state,
+                        "last_changed": last_changed,
+                        "attributes": attributes
+                    }
+                    save_to_file(event_data)
+                    
+                    print(f"Flic Button State: {state}")
+                    print(f"Flic Last Changed: {last_changed}")
+                    print(f"Flic Attributes: {json.dumps(attributes, indent=2)}")
+                    print("---")
+                    
+                    previous_state = state
+                    previous_last_changed = last_changed
+        
+        await asyncio.sleep(1)  # Pull every 1 second
+
+async def main():
+    print(f"Starting new session. Logging to: {LOG_FILE}")
+    await asyncio.gather(
+        monitor_light(),
+        monitor_flic()
+    )
+
+asyncio.run(main())
