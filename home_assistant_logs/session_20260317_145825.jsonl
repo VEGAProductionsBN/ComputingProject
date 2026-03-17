@@ -1,0 +1,6 @@
+{"timestamp": "2026-03-17T14:58:26.008797", "type": "light_change", "brightness": 255, "color": "Color Temp: 2000K", "last_changed": "2026-03-17T14:43:46.776810+00:00"}
+{"timestamp": "2026-03-17T14:58:26.009916", "type": "flic_press", "state": "on", "last_changed": "2026-03-17T14:57:11.890459+00:00", "attributes": {"address": "80:e4:da:79:f7:12", "friendly_name": "flic_80e4da79f712"}}
+{"timestamp": "2026-03-17T14:58:43.814490", "type": "flic_press", "state": "on", "last_changed": "2026-03-17T14:59:05.859468+00:00", "attributes": {"address": "80:e4:da:79:f7:12", "friendly_name": "flic_80e4da79f712"}}
+{"timestamp": "2026-03-17T14:58:48.428674", "type": "flic_press", "state": "on", "last_changed": "2026-03-17T14:59:10.157746+00:00", "attributes": {"address": "80:e4:da:79:f7:12", "friendly_name": "flic_80e4da79f712"}}
+{"timestamp": "2026-03-17T14:58:52.116600", "type": "light_change", "brightness": 145, "color": "Color Temp: 2000K", "last_changed": "2026-03-17T14:43:46.776810+00:00"}
+{"timestamp": "2026-03-17T14:58:55.799798", "type": "light_change", "brightness": 219, "color": "Color Temp: 2000K", "last_changed": "2026-03-17T14:43:46.776810+00:00"}
