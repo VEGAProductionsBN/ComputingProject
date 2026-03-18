@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Video Metadata Explorer</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" integrity="sha384-" crossorigin="anonymous" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <style>
+      body {
+        padding-top: 2rem;
+        background: #0f172a;
+        color: #e5e5e5;
+      }
+      .container {
+        max-width: 1300px;
+      }
+      .card {
+        margin-bottom: 1rem;
+        background: #111827;
+        border: 2px solid #4b5563;
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+      }
+      .card .card-body,
+      .alert,
+      .list-group-item {
+        background: #1e1e1e;
+        color: #e5e5e5;
+        border-color: #333;
+      }
+      .value-wrap { word-break: break-word; }
+      .btn-primary { background-color: #2563eb; border-color: #1d4ed8; }
+      .btn-primary:hover { background-color: #1d4ed8; }
+      .event-item.active { background-color: #2563eb; color: white; }
+      .chart-container {
+        background: #0b0f19;
+        padding: 0.75rem;
+        border-radius: 0.75rem;
+        border: 1px solid #374151;
+      }
+      .timeline-note {
+        font-size: 0.85rem;
+        color: #9ca3af;
+      }
+    </style>
+  </head>
+  <body class="bg-dark text-light">
+    <div class="container">
+      <h1 class="mb-4">Video Metadata Explorer</h1>
+
+      {% with messages = get_flashed_messages() %}
+        {% if messages %}
+          <div class="alert alert-warning" role="alert">
+            <ul class="mb-0">
+            {% for message in messages %}
+              <li>{{ message }}</li>
+            {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+      {% endwith %}
+
+      <div class="card">
+        <div class="card-body">
+          <form method="POST" enctype="multipart/form-data">
+            <div class="mb-3">
+              <label for="jsonFile" class="form-label">Metadata JSON/JSONL file</label>
+              <input class="form-control" type="file" accept=".json,.jsonl,application/json" id="jsonFile" name="json_file" required />
+            </div>
+            <div class="mb-3">
+              <label for="videoFile" class="form-label">Video file</label>
+              <input class="form-control" type="file" accept="video/*" id="videoFile" name="video_file" required />
+            </div>
+            <button type="submit" class="btn btn-primary">Upload</button>
+          </form>
+        </div>
+      </div>
+
+      {% if metadata is defined %}
+      <div class="mb-4">
+        <div class="card">
+          <div class="card-body">
+            <h3>Video Player</h3>
+            <video id="videoPlayer" class="w-100" controls preload="metadata" playsinline style="max-height: 65vh; object-fit: contain;">
+              <source src="{{ video_url }}" type="{{ video_type if video_type is defined else 'video/mp4' }}" />
+              Your browser does not support the video tag.
+            </video>
+            <div id="videoStatus" class="mt-2 text-muted">Loading video...</div>
+            <p class="mt-2">Uploaded JSON: <strong>{{ json_filename }}</strong></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <div class="card">
+          <div class="card-body">
+            <h3>Event Timeline</h3>
+            {% if events is defined and events %}
+              <div class="chart-container">
+                <canvas id="timelineChart" height="140"></canvas>
+              </div>
+              <div class="mt-2" id="typeLegend"></div>
+              <div class="mt-2 timeline-note">Event markers are shown on a timeline; click to seek without autoplay.</div>
+            {% else %}
+              <p>No event timeline available.</p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <div class="card">
+          <div class="card-body">
+            <h3>Event Details</h3>
+            {% if events is defined and events %}
+              <ul class="list-group mb-2" id="eventList">
+                {% for evt in events %}
+                  <li class="list-group-item event-item" data-index="{{ evt.index }}" style="cursor:pointer;">
+                    {{ evt.time_text or evt.timestamp or 'no timestamp' }} — {{ evt.description }}
+                  </li>
+                {% endfor %}
+              </ul>
+              <pre id="eventDetail" style="white-space: pre-wrap; max-height: 360px; overflow: auto; background: #0f172a; color: #e5e5e5; padding: 0.75rem; border-radius: 0.25rem; border: 1px solid #334155;"></pre>
+            {% else %}
+              <p>No event data loaded.</p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+    </div>
+
+    <script>
+      const videoElement = document.getElementById('videoPlayer');
+      const videoStatus = document.getElementById('videoStatus');
+      if (videoElement && videoStatus) {
+        videoElement.addEventListener('loadedmetadata', () => {
+          videoStatus.innerText = `Duration ${videoElement.duration.toFixed(2)}s. Ready to play.`;
+        });
+        videoElement.addEventListener('error', () => {
+          videoStatus.innerText = 'Error: Unable to load video. Check format/codec.';
+          videoStatus.classList.add('text-danger');
+        });
+        videoElement.addEventListener('playing', () => {
+          videoStatus.innerText = 'Playing';
+          videoStatus.classList.remove('text-danger');
+        });
+        videoElement.addEventListener('pause', () => {
+          if (!videoElement.ended) videoStatus.innerText = 'Paused';
+        });
+        videoElement.addEventListener('timeupdate', () => {
+          const t = videoElement.currentTime.toFixed(1);
+          document.title = `Video Metadata Explorer - time ${t}s`;
+          if (timelineChart && timelineChart.data.datasets[2]) {
+            timelineChart.data.datasets[2].data[0].x = videoElement.currentTime;
+            const maxX = Math.max(maxEventTime, videoElement.duration || 1);
+            timelineChart.options.scales.x.max = maxX;
+            timelineChart.update('none');
+          }
+        });
+      }
+
+      function showEventDetails(index) {
+        const event = eventsData.find(e => e.index === index);
+        if (!event) return;
+
+        const lines = [
+          `Index: ${event.index}`,
+          `Time: ${event.time_text || 'n/a'}`,
+          `Type: ${event.type}`,
+          `Description: ${event.description}`,
+          `Details:`,
+        ];
+
+        if (event.details && event.details.length > 0) {
+          event.details.forEach(d => lines.push(`  - ${d}`));
+        }
+
+        lines.push('Payload:');
+        lines.push(JSON.stringify(event.payload, null, 2));
+
+        document.getElementById('eventDetail').innerText = lines.join('\n');
+
+        document.querySelectorAll('.event-item').forEach(el => el.classList.remove('active'));
+        const selectedEl = document.querySelector(`.event-item[data-index='${index}']`);
+        if (selectedEl) selectedEl.classList.add('active');
+      }
+
+      const eventsData = {{ events|default([])|tojson }};
+      let timelineChart = null;
+      let maxEventTime = 0;
+      if (eventsData && eventsData.length > 0) {
+        const colorByType = {
+          'flic_press': '#60a5fa',
+          'light_change': '#facc15',
+          'motion': '#34d399',
+          'unknown': '#a78bfa',
+        };
+
+        const eventPoints = eventsData.map(ev => {
+          const x = ev.x_val != null ? ev.x_val : (ev.tsecs || ev.index);
+          const type = ev.type || 'unknown';
+          return {
+            x,
+            y: 1,
+            label: type.replace('_', ' ').toUpperCase(),
+            idx: ev.index,
+            eventType: type,
+            backgroundColor: colorByType[type] || '#a78bfa',
+            borderColor: colorByType[type] || '#a78bfa',
+          };
+        });
+
+        const eventTimes = eventPoints.map(pt => pt.x);
+        maxEventTime = Math.max(...eventTimes, 0);
+
+        const legendEl = document.getElementById('typeLegend');
+        if (legendEl) {
+          const uniqueTypes = Array.from(new Set(eventPoints.map(pt => pt.eventType)));
+          legendEl.innerHTML = uniqueTypes.map(type => {
+            const color = colorByType[type] || '#a78bfa';
+            return `<span style="margin-right: 0.75rem; font-size:0.9rem;
+              display:inline-flex; align-items:center; color:#e5e5e5;">
+              <span style="width:12px;height:12px;background:${color};border-radius:50%;display:inline-block;margin-right:0.4rem;"></span>${type}</span>`;
+          }).join('');
+        }
+
+        const ctx = document.getElementById('timelineChart').getContext('2d');
+        timelineChart = new Chart(ctx, {
+          type: 'scatter',
+          data: {
+            datasets: [{
+              label: 'Event timeline',
+              data: eventPoints,
+              pointRadius: 8,
+              pointBackgroundColor: eventPoints.map(pt => pt.backgroundColor),
+              pointBorderColor: eventPoints.map(pt => pt.borderColor),
+              pointBorderWidth: 2,
+              showLine: false,
+              hoverRadius: 10,
+            }, {
+              label: 'Timeline baseline',
+              data: [{ x: 0, y: 1 }, { x: Math.max(maxEventTime, 1), y: 1 }],
+              type: 'line',
+              borderColor: '#334155',
+              borderWidth: 2,
+              pointRadius: 0,
+              fill: false,
+              tension: 0,
+            }, {
+              label: 'Current play head',
+              data: [{ x: 0, y: 1 }],
+              pointRadius: 10,
+              backgroundColor: 'rgba(255, 99, 132, 1)',
+              showLine: false,
+              hoverRadius: 0,
+              pointStyle: 'triangle',
+            }]
+          },
+          options: {
+            animation: false,
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              x: {
+                type: 'linear',
+                min: 0,
+                max: Math.max(maxEventTime, 1),
+                title: { display: true, text: 'Seconds (from first event)', color: '#9ca3af' },
+                ticks: { color: '#9ca3af', stepSize: Math.max(1, Math.floor(maxEventTime / 8)), },
+                grid: { color: 'rgba(148, 163, 184, 0.2)', borderColor: '#374151' }
+              },
+              y: {
+                min: 0.6,
+                max: 1.4,
+                ticks: { display: false },
+                grid: { display: false }
+              }
+            },
+            plugins: {
+              zoom: {
+                pan: {
+                  enabled: true,
+                  mode: 'x',
+                  modifierKey: 'ctrl',
+                },
+                zoom: {
+                  wheel: {
+                    enabled: true,
+                  },
+                  pinch: {
+                    enabled: true,
+                  },
+                  mode: 'x',
+                },
+              },
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: context => {
+                    if (context.datasetIndex === 1) {
+                      return `Video time: ${context.raw.x.toFixed(2)}s`;
+                    }
+                    return `${context.raw.label} (@${context.raw.x.toFixed(2)}s)`;
+                  }
+                }
+              }
+            },
+            onClick: (event) => {
+              const points = timelineChart.getElementsAtEventForMode(event, 'nearest', { intersect: true }, false);
+              if (points.length) {
+                const idx = points[0].index;
+                const ev = eventsData[idx];
+                if (ev) {
+                  showEventDetails(ev.index);
+                  if (videoElement && ev.x_val != null && !isNaN(ev.x_val)) {
+                    videoElement.currentTime = ev.x_val;
+                    videoElement.pause();
+                  }
+                }
+              }
+            }
+          }
+        });
+
+        // click handler for event list entries
+        document.querySelectorAll('.event-item').forEach(item => {
+          item.addEventListener('click', () => {
+            const idx = parseInt(item.dataset.index, 10);
+            showEventDetails(idx);
+            const ev = eventsData.find(e => e.index === idx);
+            if (videoElement && ev && ev.x_val != null && !isNaN(ev.x_val)) {
+              videoElement.currentTime = ev.x_val;
+              videoElement.pause();
+            }
+          });
+        });
+
+        // Pick first by default
+        showEventDetails(eventsData[0].index);
+      }
+    </script>
+  </body>
+</html>
