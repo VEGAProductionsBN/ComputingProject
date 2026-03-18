@@ -62,8 +62,3 @@ Then open `http://localhost:5000`.
 {"timestamp": "2026-03-17T14:58:26.009916", "type": "flic_press", "state": "on", "attributes": {"address": "80:e4:da:79:f7:12", "friendly_name": "flic_80e4da79f712"}}
 {"timestamp": "2026-03-17T14:58:43.814490", "type": "flic_press", "state": "on"}
 ```
-
-## Optional improvements
-- Add connection between video timestamp and time-series metadata
-- Support JSONL and nested metadata via recursive parsing
-- Add security checks for large uploads
