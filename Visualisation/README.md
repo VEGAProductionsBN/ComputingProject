@@ -63,10 +63,6 @@ Then open `http://localhost:5000`.
 {"timestamp": "2026-03-17T14:58:43.814490", "type": "flic_press", "state": "on"}
 ```
 
-## GitHub deployment notes
-- This app is runnable on GitHub Codespaces. In the Codespace terminal, start with `python app.py` and use forwarded ports.
-- GitHub Pages cannot host Flask backend directly; for static-only hosting, use other service (e.g., Render, Heroku, or GitHub Actions to build deploy to VPS).
-
 ## Optional improvements
 - Add connection between video timestamp and time-series metadata
 - Support JSONL and nested metadata via recursive parsing
