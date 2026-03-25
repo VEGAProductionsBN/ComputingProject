@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" integrity="sha384-" crossorigin="anonymous" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" crossorigin="anonymous" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     <style>
@@ -25,6 +25,26 @@
         --accent-3: #f59e0b;
       }
       * { box-sizing: border-box; }
+      * {
+        scrollbar-width: thin;
+        scrollbar-color: rgba(14, 165, 233, 0.72) rgba(15, 23, 42, 0.62);
+      }
+      *::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+      *::-webkit-scrollbar-track {
+        background: rgba(15, 23, 42, 0.62);
+        border-radius: 999px;
+      }
+      *::-webkit-scrollbar-thumb {
+        background: linear-gradient(180deg, rgba(14, 165, 233, 0.9), rgba(34, 197, 94, 0.8));
+        border-radius: 999px;
+        border: 2px solid rgba(15, 23, 42, 0.7);
+      }
+      *::-webkit-scrollbar-thumb:hover {
+        background: linear-gradient(180deg, rgba(56, 189, 248, 0.95), rgba(74, 222, 128, 0.85));
+      }
       body {
         font-family: "Space Grotesk", "Segoe UI", sans-serif;
         padding: 1.8rem 0 2.4rem;
@@ -40,6 +60,11 @@
       }
       .hero {
         margin-bottom: 1rem;
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 1rem;
+        flex-wrap: wrap;
       }
       .hero-title {
         margin: 0;
@@ -51,6 +76,16 @@
         margin: 0.45rem 0 0;
         color: var(--text-soft);
         max-width: 70ch;
+      }
+      .hero-pill {
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #d1fae5;
+        border: 1px solid rgba(16, 185, 129, 0.38);
+        border-radius: 999px;
+        padding: 0.3rem 0.75rem;
+        background: rgba(6, 78, 59, 0.45);
       }
       .card {
         margin-bottom: 1rem;
@@ -92,6 +127,112 @@
         background: rgba(15, 23, 42, 0.7);
         color: var(--text-main);
       }
+      .form-control::file-selector-button {
+        border: 0;
+        background: rgba(56, 189, 248, 0.2);
+        color: #dbeafe;
+        border-radius: 0.5rem;
+        padding: 0.3rem 0.7rem;
+        margin-right: 0.7rem;
+      }
+      .form-select {
+        border-radius: 0.75rem;
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        background-color: rgba(15, 23, 42, 0.7);
+        color: var(--text-main);
+        --bs-form-select-bg-icon: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23bae6fd' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M2 5l6 6 6-6'/%3e%3c/svg%3e");
+      }
+      .form-select:focus {
+        border-color: rgba(56, 189, 248, 0.6);
+        box-shadow: 0 0 0 0.2rem rgba(56, 189, 248, 0.18);
+        background-color: rgba(15, 23, 42, 0.9);
+        color: var(--text-main);
+      }
+      .form-select option {
+        background: #0f172a;
+        color: #dce6f5;
+      }
+      .upload-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.8rem;
+      }
+      .upload-hint {
+        margin-top: 0.55rem;
+        color: var(--text-faint);
+        font-size: 0.83rem;
+      }
+      .summary-strip {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(180px, 1fr));
+        gap: 0.7rem;
+        margin-bottom: 1rem;
+      }
+      .summary-chip {
+        background: linear-gradient(160deg, rgba(14, 116, 144, 0.3), rgba(22, 101, 52, 0.3));
+        border: 1px solid rgba(125, 211, 252, 0.24);
+        border-radius: 0.8rem;
+        padding: 0.65rem 0.8rem;
+      }
+      .summary-label {
+        color: #bae6fd;
+        font-size: 0.74rem;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .summary-value {
+        margin-top: 0.15rem;
+        font-size: 1rem;
+        font-weight: 600;
+        color: #f0f9ff;
+      }
+      .analysis-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+        gap: 1rem;
+        align-items: stretch;
+      }
+      .analysis-main {
+        display: flex;
+        flex-direction: column;
+      }
+      .analysis-side {
+        display: flex;
+        min-height: 0;
+      }
+      .event-list-wrap {
+        max-height: 340px;
+        overflow-y: auto;
+        border-radius: 0.7rem;
+        border: 1px solid rgba(148, 163, 184, 0.24);
+      }
+      .event-explorer-card {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        margin-bottom: 0;
+      }
+      .analysis-main .card:last-child,
+      .event-explorer-card {
+        margin-bottom: 0 !important;
+      }
+      .event-explorer-card .card-body {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+      .event-explorer-card .event-list-wrap {
+        flex: 0 0 auto;
+        max-height: 220px;
+        overflow-y: auto;
+      }
+      .event-explorer-card #eventDetail {
+        margin-top: 0.6rem;
+        max-height: 280px;
+        overflow: auto;
+        flex: 0 0 auto;
+      }
       .form-control:focus {
         background: rgba(15, 23, 42, 0.85);
         color: var(--text-main);
@@ -120,6 +261,9 @@
       .event-item {
         padding: 0.75rem 0.85rem;
         transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+      }
+      .event-item.hidden {
+        display: none;
       }
       .event-item:hover {
         transform: translateY(-1px);
@@ -191,6 +335,24 @@
       .timeline-note {
         font-size: 0.85rem;
         color: var(--text-faint);
+      }
+      .control-row {
+        display: flex;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+        margin-bottom: 0.75rem;
+      }
+      .control-row .form-control,
+      .control-row .form-select {
+        flex: 1;
+        min-width: 170px;
+      }
+      .empty-state {
+        padding: 1.25rem;
+        text-align: center;
+        color: var(--text-faint);
+        border: 1px dashed rgba(148, 163, 184, 0.33);
+        border-radius: 0.65rem;
       }
       #loadingOverlay {
         display: none;
@@ -291,6 +453,12 @@
         padding: 0.65rem;
         color: #bae6fd;
       }
+      .sticky-detail {
+        position: static;
+        display: flex;
+        flex: 1 1 auto;
+        min-height: 0;
+      }
       video {
         border-radius: 0.75rem;
         border: 1px solid rgba(148, 163, 184, 0.25);
@@ -313,6 +481,27 @@
         .card { border-radius: 0.8rem; }
         .event-item { padding: 0.65rem 0.7rem; }
         .chart-container { height: 220px; }
+        .upload-grid,
+        .summary-strip,
+        .analysis-grid {
+          grid-template-columns: 1fr;
+        }
+        .event-list-wrap {
+          max-height: 280px;
+        }
+        .analysis-side,
+        .sticky-detail {
+          display: block;
+        }
+        .event-explorer-card {
+          max-height: none;
+        }
+        .event-explorer-card .event-list-wrap {
+          max-height: 280px;
+        }
+        .event-explorer-card #eventDetail {
+          min-height: 0;
+        }
       }
     </style>
   </head>
@@ -328,8 +517,10 @@
 
     <div class="container">
       <header class="hero">
-        <h1 class="hero-title">
-Automated Interpretation of IoT Metadata for Video Editing</h1>
+        <div>
+          <h1 class="hero-title">Automated Interpretation of IoT Metadata for Video Editing</h1>
+          <p class="hero-subtitle">Upload a video and optionally an event log, then inspect synchronized events, transcript context, and metadata in one place.</p>
+        </div>
       </header>
 
       {% with messages = get_flashed_messages() %}
@@ -349,47 +540,112 @@ Automated Interpretation of IoT Metadata for Video Editing</h1>
             <h2 class="section-title">Upload And Process</h2>
             <p class="section-caption">Use Home Assistant JSON or JSONL event file, or let the app generate analysis directly from your video.</p>
           <form method="POST" enctype="multipart/form-data">
-            <div class="mb-3">
-              <label for="jsonFile" class="form-label">Metadata JSON/JSONL file <span class="text-muted small">(a transcript will be generated from uploaded video)</span></label>
-              <input class="form-control" type="file" accept=".json,.jsonl,application/json" id="jsonFile" name="json_file" />
+            <div class="upload-grid">
+              <div>
+                <label for="quickSelectFile" class="form-label">Quick Select Log File</label>
+                <select class="form-select" id="quickSelectFile" name="quick_select_file">
+                  <option value="">-- Browse or upload file --</option>
+                </select>
+                <div class="upload-hint">Select a recent session log from your archives.</div>
+              </div>
+              <div>
+                <label for="jsonFile" class="form-label">Or Upload JSON/JSONL file</label>
+                <input class="form-control" type="file" accept=".json,.jsonl,application/json" id="jsonFile" name="json_file" />
+                <div class="upload-hint">Optional. If skipped, metadata and transcript are generated from the video.</div>
+              </div>
             </div>
-            <div class="mb-3">
-              <label for="videoFile" class="form-label">Video file</label>
-              <input class="form-control" type="file" accept="video/*" id="videoFile" name="video_file" required />
+            <div class="upload-grid">
+              <div>
+                <label for="videoFile" class="form-label">Video file</label>
+                <input class="form-control" type="file" accept="video/*" id="videoFile" name="video_file" required />
+                <div class="upload-hint">Required. Supports MP4, MOV, WEBM, OGG, and MKV.</div>
+              </div>
             </div>
-            <button type="submit" class="btn btn-primary" id="uploadBtn">Upload &amp; Process</button>
+            <button type="submit" class="btn btn-primary mt-3" id="uploadBtn">Upload And Process</button>
           </form>
         </div>
       </div>
 
       {% if metadata is defined %}
-      <div class="mb-4">
-        <div class="card">
-          <div class="card-body">
-            <h2 class="section-title">Video Player</h2>
-            <video id="videoPlayer" class="w-100" controls preload="metadata" playsinline style="max-height: 65vh; object-fit: contain;">
-              <source src="{{ video_url }}" type="{{ video_type if video_type is defined else 'video/mp4' }}" />
-              Your browser does not support the video tag.
-            </video>
-            <div id="videoStatus" class="mt-2 text-muted">Loading video...</div>
-            <p class="mt-2">Uploaded JSON: <strong>{{ json_filename }}</strong></p>
-          </div>
+      <div class="summary-strip">
+        <div class="summary-chip">
+          <div class="summary-label">Loaded Events</div>
+          <div class="summary-value">{{ events|length if events is defined else 0 }}</div>
+        </div>
+        <div class="summary-chip">
+          <div class="summary-label">Transcript Records</div>
+          <div class="summary-value">{{ raw_jsonl_lines|length if raw_jsonl_lines is defined else 0 }}</div>
+        </div>
+        <div class="summary-chip">
+          <div class="summary-label">JSON Source</div>
+          <div class="summary-value value-wrap">{{ json_filename }}</div>
         </div>
       </div>
 
-      <div class="mb-4">
-        <div class="card">
-          <div class="card-body">
-            <h2 class="section-title">Event Timeline</h2>
-            {% if events is defined and events %}
-              <div class="chart-container">
-                <canvas id="timelineChart" height="140"></canvas>
+      <div class="analysis-grid mb-4">
+        <div class="analysis-main">
+          <div class="card">
+            <div class="card-body">
+              <h2 class="section-title">Video Player</h2>
+              <video id="videoPlayer" class="w-100" controls preload="metadata" playsinline style="max-height: 65vh; object-fit: contain;">
+                <source src="{{ video_url }}" type="{{ video_type if video_type is defined else 'video/mp4' }}" />
+                Your browser does not support the video tag.
+              </video>
+              <div id="videoStatus" class="mt-2 text-muted">Loading video...</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-body">
+              <h2 class="section-title">Event Timeline</h2>
+              {% if events is defined and events %}
+                <div class="chart-container">
+                  <canvas id="timelineChart" height="140"></canvas>
+                </div>
+                <div class="mt-2" id="typeLegend"></div>
+                <div class="mt-2 timeline-note">Click an event marker to jump the video. Hold Ctrl while dragging to pan across dense sections.</div>
+              {% else %}
+                <p>No event timeline available.</p>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="analysis-side">
+          <div class="sticky-detail">
+            <div class="card event-explorer-card" id="eventExplorerCard">
+              <div class="card-body">
+                <h2 class="section-title">Event Explorer</h2>
+                {% if events is defined and events %}
+                  <div class="control-row">
+                    <input id="eventSearch" class="form-control" type="search" placeholder="Search by type, description, or transcript" />
+                    <select id="eventTypeFilter" class="form-select" aria-label="Filter events by type">
+                      <option value="all">All event types</option>
+                    </select>
+                  </div>
+                  <div id="eventCountHint" class="timeline-note mb-2"></div>
+                  <div class="event-list-wrap">
+                    <ul class="list-group" id="eventList">
+                      {% for evt in events %}
+                        <li class="list-group-item event-item" data-index="{{ evt.index }}" data-type="{{ evt.type or 'unknown' }}" style="cursor:pointer;">
+                          <div class="event-tile-top">
+                            <span class="event-time">{{ evt.time_text or evt.timestamp or 'No timestamp' }}</span>
+                            <span class="event-relative">Timeline {{ '%.2f'|format(evt.x_val) if evt.x_val is not none else 'n/a' }}s</span>
+                          </div>
+                          <div class="event-type-row">
+                            <span class="event-type">{{ (evt.type or 'unknown')|replace('_', ' ')|title }}</span>
+                          </div>
+                          <div class="event-context">{{ evt.inferred_topic or evt.description }}</div>
+                        </li>
+                      {% endfor %}
+                    </ul>
+                  </div>
+                  <div id="eventDetail" class="event-detail mt-2"></div>
+                {% else %}
+                  <div class="empty-state">No event data loaded.</div>
+                {% endif %}
               </div>
-              <div class="mt-2" id="typeLegend"></div>
-              <div class="mt-2 timeline-note">Event markers are shown on a timeline; click to seek without autoplay.</div>
-            {% else %}
-              <p>No event timeline available.</p>
-            {% endif %}
+            </div>
           </div>
         </div>
       </div>
@@ -404,37 +660,31 @@ Automated Interpretation of IoT Metadata for Video Editing</h1>
         </div>
       </div>
 
-      <div class="mb-4">
-        <div class="card">
-          <div class="card-body">
-            <h2 class="section-title">Event Details</h2>
-            {% if events is defined and events %}
-              <ul class="list-group mb-2" id="eventList">
-                {% for evt in events %}
-                  <li class="list-group-item event-item" data-index="{{ evt.index }}" style="cursor:pointer;">
-                    <div class="event-tile-top">
-                      <span class="event-time">{{ evt.time_text or evt.timestamp or 'No timestamp' }}</span>
-                      <span class="event-relative">Timeline {{ '%.2f'|format(evt.x_val) if evt.x_val is not none else 'n/a' }}s</span>
-                    </div>
-                    <div class="event-type-row">
-                      <span class="event-type">{{ (evt.type or 'unknown')|replace('_', ' ')|title }}</span>
-                    </div>
-                    <div class="event-context">{{ evt.inferred_topic or evt.description }}</div>
-                  </li>
-                {% endfor %}
-              </ul>
-              <div id="eventDetail" class="event-detail"></div>
-            {% else %}
-              <p>No event data loaded.</p>
-            {% endif %}
-          </div>
-        </div>
-      </div>
       {% endif %}
 
     </div>
 
     <script>
+      // Load available log files into quick-select dropdown
+      (function () {
+        const quickSelectEl = document.getElementById('quickSelectFile');
+        if (!quickSelectEl) return;
+
+        fetch('/api/available-logs')
+          .then(res => res.json())
+          .then(logs => {
+            if (logs && logs.length > 0) {
+              logs.forEach(log => {
+                const option = document.createElement('option');
+                option.value = log.path;
+                option.textContent = log.name;
+                quickSelectEl.appendChild(option);
+              });
+            }
+          })
+          .catch(err => console.error('Failed to load available logs:', err));
+      })();
+
       // Loading overlay
       (function () {
         const form = document.querySelector('form[enctype="multipart/form-data"]');
@@ -534,6 +784,46 @@ Automated Interpretation of IoT Metadata for Video Editing</h1>
       const eventsData = {{ events|default([])|tojson }};
       let timelineChart = null;
       let maxEventTime = 0;
+      let visibleEventIndexes = [];
+
+      function updateEventCountHint() {
+        const hintEl = document.getElementById('eventCountHint');
+        if (!hintEl) return;
+        hintEl.innerText = `${visibleEventIndexes.length} of ${eventsData.length} events shown`;
+      }
+
+      function applyEventFilters() {
+        const searchEl = document.getElementById('eventSearch');
+        const typeEl = document.getElementById('eventTypeFilter');
+        const query = (searchEl?.value || '').trim().toLowerCase();
+        const selectedType = typeEl?.value || 'all';
+
+        visibleEventIndexes = [];
+        document.querySelectorAll('.event-item').forEach(item => {
+          const idx = Number(item.dataset.index);
+          const event = eventsData.find(e => e.index === idx);
+          if (!event) return;
+
+          const haystack = [
+            event.type,
+            event.description,
+            event.inferred_topic,
+            event.inferred_transcript,
+            event.time_text,
+          ].join(' ').toLowerCase();
+
+          const typeOk = selectedType === 'all' || (event.type || 'unknown') === selectedType;
+          const textOk = !query || haystack.includes(query);
+          const visible = typeOk && textOk;
+
+          item.classList.toggle('hidden', !visible);
+          if (visible) {
+            visibleEventIndexes.push(event.index);
+          }
+        });
+        updateEventCountHint();
+      }
+
       if (eventsData && eventsData.length > 0) {
         const colorByType = {
           'flic_press': '#60a5fa',
@@ -568,6 +858,14 @@ Automated Interpretation of IoT Metadata for Video Editing</h1>
               display:inline-flex; align-items:center; color:#e5e5e5;">
               <span style="width:12px;height:12px;background:${color};border-radius:50%;display:inline-block;margin-right:0.4rem;"></span>${type}</span>`;
           }).join('');
+        }
+
+        const filterEl = document.getElementById('eventTypeFilter');
+        if (filterEl) {
+          const uniqueTypes = Array.from(new Set(eventsData.map(ev => ev.type || 'unknown'))).sort();
+          filterEl.innerHTML = '<option value="all">All event types</option>' + uniqueTypes
+            .map(type => `<option value="${type}">${type.replace('_', ' ')}</option>`)
+            .join('');
         }
 
         const ctx = document.getElementById('timelineChart').getContext('2d');
@@ -682,6 +980,17 @@ Automated Interpretation of IoT Metadata for Video Editing</h1>
             }
           });
         });
+
+        const searchInput = document.getElementById('eventSearch');
+        const typeFilter = document.getElementById('eventTypeFilter');
+        if (searchInput) {
+          searchInput.addEventListener('input', applyEventFilters);
+        }
+        if (typeFilter) {
+          typeFilter.addEventListener('change', applyEventFilters);
+        }
+
+        applyEventFilters();
 
         // Pick first by default
         showEventDetails(eventsData[0].index);

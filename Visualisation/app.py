@@ -2,7 +2,7 @@ import os
 import json
 from pathlib import Path
 from datetime import datetime
-from flask import Flask, request, render_template, redirect, url_for, flash
+from flask import Flask, request, render_template, redirect, url_for, flash, jsonify
 from werkzeug.utils import secure_filename
 from hachoir.parser import createParser
 from hachoir.metadata import extractMetadata
@@ -26,6 +26,7 @@ def get_whisper_model():
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_FOLDER = BASE_DIR / "static" / "uploads"
+LOG_FOLDER = BASE_DIR.parent / "home_assistant_logs"
 
 # Clear any existing files on first startup
 if UPLOAD_FOLDER.exists():
@@ -44,6 +45,16 @@ ALLOWED_VIDEO_EXTENSIONS = {"mp4", "mov", "webm", "ogg", "mkv"}
 
 def allowed_file(filename, allowed_exts):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in allowed_exts
+
+
+def get_available_logs():
+    """List available JSON/JSONL files from the logs folder."""
+    available = []
+    if LOG_FOLDER.exists() and LOG_FOLDER.is_dir():
+        for file_path in sorted(LOG_FOLDER.glob("*")):
+            if file_path.is_file() and allowed_file(file_path.name, ALLOWED_JSON_EXTENSIONS):
+                available.append({"name": file_path.name, "path": str(file_path)})
+    return available
 
 
 def generate_jsonl_from_video(video_path):
@@ -170,6 +181,12 @@ def extract_stats(metadata):
     return stats
 
 
+@app.route("/api/available-logs", methods=["GET"])
+def api_available_logs():
+    """Return list of available JSON/JSONL files from logs folder."""
+    return jsonify(get_available_logs())
+
+
 @app.route("/", methods=["GET", "POST"])
 def upload_page():
     if request.method == "POST":
@@ -179,13 +196,14 @@ def upload_page():
 
         video_file = request.files["video_file"]
         json_file = request.files.get("json_file")
-        use_json_file = json_file is not None and json_file.filename != ""
+        quick_select_file = request.form.get("quick_select_file", "")
+        use_json_file = (json_file is not None and json_file.filename != "") or quick_select_file != ""
 
         if video_file.filename == "":
             flash("No video file selected.")
             return redirect(request.url)
 
-        if use_json_file and not allowed_file(json_file.filename, ALLOWED_JSON_EXTENSIONS):
+        if use_json_file and not quick_select_file and not allowed_file(json_file.filename, ALLOWED_JSON_EXTENSIONS):
             flash("Invalid JSON file extension")
             return redirect(request.url)
 
@@ -218,9 +236,19 @@ def upload_page():
             return redirect(request.url)
 
         if use_json_file:
-            json_filename = secure_filename(json_file.filename)
-            json_path = UPLOAD_FOLDER / json_filename
-            json_file.save(json_path)
+            if quick_select_file:
+                # Handle quick-select file from logs folder
+                json_path = Path(quick_select_file)
+                if not json_path.exists() or not json_path.is_file():
+                    flash("Selected log file not found.")
+                    return redirect(request.url)
+                json_filename = json_path.name
+            else:
+                # Handle uploaded file
+                json_filename = secure_filename(json_file.filename)
+                json_path = UPLOAD_FOLDER / json_filename
+                json_file.save(json_path)
+            
             try:
                 with open(json_path, "r", encoding="utf-8") as f:
                     if json_filename.lower().endswith(".jsonl"):
