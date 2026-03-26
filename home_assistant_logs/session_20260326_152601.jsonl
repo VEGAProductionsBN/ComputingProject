@@ -1,0 +1,28 @@
+{"timestamp": "2026-03-26T15:26:01.313171", "type": "light_change", "brightness": 87, "color": "HS: [256.0, 88.0]", "last_changed": "2026-03-26T15:19:55.458147+00:00"}
+{"timestamp": "2026-03-26T15:26:01.314378", "type": "flic_press", "state": "on", "last_changed": "2026-03-26T15:23:35.826078+00:00", "attributes": {"address": "80:e4:da:79:f7:12", "friendly_name": "flic_80e4da79f712"}}
+{"timestamp": "2026-03-26T15:26:01.315121", "type": "tapo_p110_change", "entity_id": "switch.tapo_P110", "state": "off", "last_changed": "2026-03-26T15:21:32.919906+00:00", "attributes": {"friendly_name": "Tapo P110"}}
+{"timestamp": "2026-03-26T15:26:04.681411", "type": "flic_press", "state": "on", "last_changed": "2026-03-26T15:26:05.712130+00:00", "attributes": {"address": "80:e4:da:79:f7:12", "friendly_name": "flic_80e4da79f712"}}
+{"timestamp": "2026-03-26T15:26:11.758564", "type": "light_change", "brightness": 87, "color": "Color Temp: 3510K", "last_changed": "2026-03-26T15:19:55.458147+00:00"}
+{"timestamp": "2026-03-26T15:26:14.208792", "type": "light_change", "brightness": 255, "color": "Color Temp: 3510K", "last_changed": "2026-03-26T15:19:55.458147+00:00"}
+{"timestamp": "2026-03-26T15:26:40.014101", "type": "flic_press", "state": "on", "last_changed": "2026-03-26T15:26:41.042651+00:00", "attributes": {"address": "80:e4:da:79:f7:12", "friendly_name": "flic_80e4da79f712"}}
+{"timestamp": "2026-03-26T15:26:57.512090", "type": "flic_press", "state": "on", "last_changed": "2026-03-26T15:26:57.948412+00:00", "attributes": {"address": "80:e4:da:79:f7:12", "friendly_name": "flic_80e4da79f712"}}
+{"timestamp": "2026-03-26T15:29:58.775278", "type": "flic_press", "state": "on", "last_changed": "2026-03-26T15:29:59.965135+00:00", "attributes": {"address": "80:e4:da:79:f7:12", "friendly_name": "flic_80e4da79f712"}}
+{"timestamp": "2026-03-26T15:32:16.396122", "type": "flic_press", "state": "on", "last_changed": "2026-03-26T15:32:16.771457+00:00", "attributes": {"address": "80:e4:da:79:f7:12", "friendly_name": "flic_80e4da79f712"}}
+{"timestamp": "2026-03-26T15:35:38.535866", "type": "flic_press", "state": "on", "last_changed": "2026-03-26T15:35:39.365429+00:00", "attributes": {"address": "80:e4:da:79:f7:12", "friendly_name": "flic_80e4da79f712"}}
+{"timestamp": "2026-03-26T15:36:48.883762", "type": "light_change", "brightness": 255, "color": "Color Temp: 2000K", "last_changed": "2026-03-26T15:19:55.458147+00:00"}
+{"timestamp": "2026-03-26T15:36:53.185741", "type": "light_change", "brightness": 255, "color": "Color Temp: 6535K", "last_changed": "2026-03-26T15:19:55.458147+00:00"}
+{"timestamp": "2026-03-26T15:37:00.250059", "type": "light_change", "brightness": 255, "color": "Color Temp: 3510K", "last_changed": "2026-03-26T15:19:55.458147+00:00"}
+{"timestamp": "2026-03-26T15:37:16.227535", "type": "flic_press", "state": "on", "last_changed": "2026-03-26T15:37:16.961496+00:00", "attributes": {"address": "80:e4:da:79:f7:12", "friendly_name": "flic_80e4da79f712"}}
+{"timestamp": "2026-03-26T15:37:45.711254", "type": "tapo_p110_change", "entity_id": "switch.tapo_P110", "state": "on", "last_changed": "2026-03-26T15:37:45.832488+00:00", "attributes": {"friendly_name": "Tapo P110"}}
+{"timestamp": "2026-03-26T15:38:13.068251", "type": "flic_press", "state": "on", "last_changed": "2026-03-26T15:38:13.660239+00:00", "attributes": {"address": "80:e4:da:79:f7:12", "friendly_name": "flic_80e4da79f712"}}
+{"timestamp": "2026-03-26T15:39:37.831377", "type": "tapo_p110_change", "entity_id": "switch.tapo_P110", "state": "off", "last_changed": "2026-03-26T15:39:38.558046+00:00", "attributes": {"friendly_name": "Tapo P110"}}
+{"timestamp": "2026-03-26T15:39:59.042787", "type": "light_change", "brightness": 255, "color": "HS: [331.0, 99.0]", "last_changed": "2026-03-26T15:19:55.458147+00:00"}
+{"timestamp": "2026-03-26T15:40:00.269124", "type": "light_change", "brightness": 255, "color": "HS: [279.0, 84.0]", "last_changed": "2026-03-26T15:19:55.458147+00:00"}
+{"timestamp": "2026-03-26T15:40:01.497489", "type": "light_change", "brightness": 255, "color": "HS: [236.0, 93.0]", "last_changed": "2026-03-26T15:19:55.458147+00:00"}
+{"timestamp": "2026-03-26T15:40:02.722553", "type": "light_change", "brightness": 255, "color": "HS: [194.0, 86.0]", "last_changed": "2026-03-26T15:19:55.458147+00:00"}
+{"timestamp": "2026-03-26T15:40:03.960275", "type": "light_change", "brightness": 255, "color": "HS: [137.0, 84.0]", "last_changed": "2026-03-26T15:19:55.458147+00:00"}
+{"timestamp": "2026-03-26T15:40:05.183206", "type": "light_change", "brightness": 255, "color": "HS: [99.0, 85.0]", "last_changed": "2026-03-26T15:19:55.458147+00:00"}
+{"timestamp": "2026-03-26T15:40:06.208608", "type": "light_change", "brightness": 255, "color": "HS: [155.0, 5.0]", "last_changed": "2026-03-26T15:19:55.458147+00:00"}
+{"timestamp": "2026-03-26T15:40:08.562281", "type": "light_change", "brightness": 255, "color": "HS: [65.0, 26.0]", "last_changed": "2026-03-26T15:19:55.458147+00:00"}
+{"timestamp": "2026-03-26T15:40:11.023190", "type": "light_change", "brightness": 255, "color": "Color Temp: 2763K", "last_changed": "2026-03-26T15:19:55.458147+00:00"}
+{"timestamp": "2026-03-26T15:40:20.031352", "type": "flic_press", "state": "on", "last_changed": "2026-03-26T15:40:20.761198+00:00", "attributes": {"address": "80:e4:da:79:f7:12", "friendly_name": "flic_80e4da79f712"}}

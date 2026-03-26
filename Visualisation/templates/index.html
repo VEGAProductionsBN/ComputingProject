@@ -273,6 +273,18 @@
         background: rgba(30, 41, 59, 0.7);
         border-color: rgba(56, 189, 248, 0.45);
       }
+      .event-item.mini-event {
+        padding: 0.52rem 0.72rem;
+        border-left: 3px solid rgba(245, 158, 11, 0.7);
+        background: rgba(51, 65, 85, 0.42);
+      }
+      .event-item.mini-event .event-time {
+        font-size: 0.86rem;
+        font-weight: 500;
+      }
+      .event-item.mini-event .event-context {
+        font-size: 0.8rem;
+      }
       .event-tile-top {
         display: flex;
         justify-content: space-between;
@@ -606,7 +618,36 @@
                   <canvas id="timelineChart" height="140"></canvas>
                 </div>
                 <div class="mt-2" id="typeLegend"></div>
-                <div class="mt-2 timeline-note">Click an event marker to jump the video. Hold Ctrl while dragging to pan across dense sections.</div>
+                <div class="mt-3" style="background:rgba(14,165,233,0.07);border:1px solid rgba(56,189,248,0.25);border-radius:0.65rem;padding:0.6rem 0.85rem;">
+                  <div style="font-size:0.82rem;color:#bae6fd;font-weight:600;margin-bottom:0.45rem;letter-spacing:0.04em;text-transform:uppercase;">Event Offset Adjustment</div>
+                  <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;">
+                    <span class="timeline-note" style="white-space:nowrap;">Shift events:</span>
+                    <input type="range" id="offsetSlider" min="-300" max="300" step="0.01" value="0"
+                      style="flex:1;min-width:140px;accent-color:#0ea5e9;cursor:pointer;" />
+                    <input type="number" id="offsetNumber" min="-300" max="300" step="0.01" value="0"
+                      class="form-control form-control-sm" style="width:88px;" />
+                    <span class="timeline-note">s</span>
+                    <button id="offsetReset" type="button"
+                      style="background:rgba(56,189,248,0.15);color:#bae6fd;border:1px solid rgba(56,189,248,0.35);border-radius:0.5rem;padding:0.2rem 0.7rem;font-size:0.82rem;cursor:pointer;">
+                      Reset
+                    </button>
+                    <button id="applyShiftedContext" type="button"
+                      style="background:rgba(16,185,129,0.15);color:#d1fae5;border:1px solid rgba(16,185,129,0.45);border-radius:0.5rem;padding:0.2rem 0.7rem;font-size:0.82rem;cursor:pointer;">
+                      Apply Context To Events
+                    </button>
+                  </div>
+                  <div id="offsetHint" class="timeline-note mt-1">Drag the slider to shift all event markers left / right and align the log with the video.</div>
+                </div>
+                <div class="mt-2 timeline-note">
+                  {% if clip_window_mode and video_duration_seconds and video_creation_datetime %}
+                  Recording started at {{ (video_creation_datetime|string)[:19] }} minus {{ '%.2f'|format(video_duration_seconds) }}s duration. Events are mapped to their true position within the clip.
+                  {% elif video_creation_datetime %}
+                  Creation date found ({{ video_creation_datetime }}) but video duration unavailable — using creation date as timeline start.
+                  {% else %}
+                  Timeline is relative: no creation date found in video metadata.
+                  {% endif %}
+                  Click a marker to jump the player. Hold Ctrl while dragging to pan. Hold Shift and drag on the chart to shift all events while zoomed.
+                </div>
               {% else %}
                 <p>No event timeline available.</p>
               {% endif %}
@@ -630,10 +671,10 @@
                   <div class="event-list-wrap">
                     <ul class="list-group" id="eventList">
                       {% for evt in events %}
-                        <li class="list-group-item event-item" data-index="{{ evt.index }}" data-type="{{ evt.type or 'unknown' }}" style="cursor:pointer;">
+                        <li class="list-group-item event-item {% if evt.is_mini_event %}mini-event{% endif %}" data-index="{{ evt.index }}" data-type="{{ evt.type or 'unknown' }}" data-mini="{{ '1' if evt.is_mini_event else '0' }}" style="cursor:pointer;">
                           <div class="event-tile-top">
                             <span class="event-time">{{ evt.time_text or evt.timestamp or 'No timestamp' }}</span>
-                            <span class="event-relative">Timeline {{ '%.2f'|format(evt.x_val) if evt.x_val is not none else 'n/a' }}s</span>
+                            <span class="event-relative" data-role="event-relative" data-base-x="{{ '%.6f'|format(evt.x_val) if evt.x_val is not none else '' }}">Video {{ '%.2f'|format(evt.x_val) if evt.x_val is not none else 'n/a' }}s</span>
                           </div>
                           <div class="event-type-row">
                             <span class="event-type">{{ (evt.type or 'unknown')|replace('_', ' ')|title }}</span>
@@ -659,6 +700,29 @@
             <h2 class="section-title">Raw JSONL Video Metadata And Transcript</h2>
             <div class="jsonl-output" id="jsonlOutput">{% if raw_jsonl_lines is defined and raw_jsonl_lines %}{% for line in raw_jsonl_lines %}{{ line }}
 {% endfor %}{% endif %}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <div class="card">
+          <div class="card-body">
+            <h2 class="section-title">Auto-Edit Export</h2>
+            <div class="section-caption">Create an automatically edited export that keeps transcript and event windows, then review the annotated keep timeline.</div>
+            <div class="control-row" style="margin-bottom:0.5rem;">
+              <button id="generateAutoEditBtn" type="button" class="btn btn-primary">Generate Auto-Edited Video</button>
+              <a id="downloadAutoEditLink" class="btn btn-outline-light" style="display:none;" download>Download Export</a>
+            </div>
+            <div id="autoEditStatus" class="timeline-note">No export generated yet.</div>
+            <div id="autoEditMetrics" class="timeline-note mt-1"></div>
+            <div id="autoEditProgressWrap" class="mt-2" style="display:none;">
+              <div style="height:12px;background:rgba(51,65,85,0.7);border:1px solid rgba(148,163,184,0.35);border-radius:999px;overflow:hidden;">
+                <div id="autoEditProgressBar" style="height:100%;width:0%;background:linear-gradient(90deg,#0ea5e9,#22c55e);transition:width 220ms ease;"></div>
+              </div>
+              <div id="autoEditProgressText" class="timeline-note mt-1">0%</div>
+            </div>
+            <div id="annotatedTimeline" class="mt-3" style="border:1px solid rgba(148,163,184,0.25);border-radius:0.7rem;padding:0.6rem;background:rgba(15,23,42,0.55);"></div>
+            <video id="autoEditPreview" class="w-100 mt-3" controls preload="metadata" style="display:none;max-height: 42vh;object-fit: contain;"></video>
           </div>
         </div>
       </div>
@@ -741,16 +805,39 @@
           document.title = `${baseTitle} | ${t}s`;
           if (timelineChart && timelineChart.data.datasets[2]) {
             timelineChart.data.datasets[2].data[0].x = videoElement.currentTime;
-            const maxX = Math.max(maxEventTime, videoElement.duration || 1);
-            timelineChart.options.scales.x.max = maxX;
             timelineChart.update('none');
           }
+        });
+      }
+
+      function getEventBaseX(event) {
+        const x = Number(event?.x_val);
+        if (Number.isFinite(x)) {
+          return x;
+        }
+        const t = Number(event?.tsecs);
+        if (Number.isFinite(t)) {
+          return t;
+        }
+        return Number(event?.index || 0);
+      }
+
+      function updateEventListTimelineLabels() {
+        document.querySelectorAll('[data-role="event-relative"]').forEach(el => {
+          const base = Number(el.dataset.baseX);
+          if (!Number.isFinite(base)) {
+            el.innerText = 'Video n/a';
+            return;
+          }
+          const shifted = base + offsetSeconds;
+          el.innerText = `Video ${shifted.toFixed(2)}s`;
         });
       }
 
       function showEventDetails(index) {
         const event = eventsData.find(e => e.index === index);
         if (!event) return;
+        selectedEventIndex = index;
 
         const eventDetailEl = document.getElementById('eventDetail');
 
@@ -771,25 +858,44 @@
           : '<div class="detail-value">No extra fields</div>';
 
         const payloadJson = escapeHtml(JSON.stringify(event.payload, null, 2));
-        const relativeTimelineTime = formatSeconds(event.x_val);
+        const adjustedTimelineTime = formatSeconds(getEventBaseX(event) + offsetSeconds);
+        const sourceRelativeTime = formatSeconds(event.relative_secs);
+        const computedContext = computeContextForEvent(event);
+        const inClipWindow = event.in_clip_window === null || event.in_clip_window === undefined
+          ? 'n/a'
+          : (event.in_clip_window ? 'yes' : 'no');
 
         eventDetailEl.innerHTML = `
           <div class="detail-grid">
             <div class="detail-chip"><div class="detail-label">Index</div><div class="detail-value">${escapeHtml(event.index)}</div></div>
             <div class="detail-chip"><div class="detail-label">Event Time</div><div class="detail-value">${escapeHtml(event.time_text || 'n/a')}</div></div>
-            <div class="detail-chip"><div class="detail-label">Relative Timeline Time</div><div class="detail-value">${relativeTimelineTime}</div></div>
+            <div class="detail-chip"><div class="detail-label">Video Timeline Time</div><div class="detail-value">${adjustedTimelineTime}</div></div>
+            <div class="detail-chip"><div class="detail-label">Raw Event Offset</div><div class="detail-value">${sourceRelativeTime}</div></div>
+            <div class="detail-chip"><div class="detail-label">Timeline Basis</div><div class="detail-value">${escapeHtml(event.timeline_basis || 'relative')}</div></div>
+            <div class="detail-chip"><div class="detail-label">Inside Clip Window</div><div class="detail-value">${inClipWindow}</div></div>
             <div class="detail-chip"><div class="detail-label">Type</div><div class="detail-value">${escapeHtml(event.type || 'unknown')}</div></div>
           </div>
 
+          <div class="detail-section-title">Manual Alignment</div>
+          <div class="detail-value" style="margin-bottom:0.45rem;">Set where this event should appear on the video timeline, then apply to shift all events.</div>
+          <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+            <input id="alignTargetTime" type="number" step="0.1" class="form-control form-control-sm" style="width:120px;" value="${escapeHtml((getEventBaseX(event) + offsetSeconds).toFixed(2))}" />
+            <span class="timeline-note">seconds</span>
+            <button id="applyEventAlignment" type="button"
+              style="background:rgba(56,189,248,0.15);color:#bae6fd;border:1px solid rgba(56,189,248,0.35);border-radius:0.5rem;padding:0.2rem 0.7rem;font-size:0.82rem;cursor:pointer;">
+              Align All Events
+            </button>
+          </div>
+
           <div class="detail-section-title">Description</div>
-          <div class="detail-value">${escapeHtml(event.description || 'n/a')}</div>
+          <div class="detail-value">${escapeHtml(computedContext.summary || event.description || 'n/a')}</div>
 
           <div class="detail-section-title">Inferred Context</div>
           <div class="detail-grid">
-            <div class="detail-chip"><div class="detail-label">Inferred Topic</div><div class="detail-value">${escapeHtml(event.inferred_topic || 'n/a')}</div></div>
-            <div class="detail-chip"><div class="detail-label">Transcript Window</div><div class="detail-value">${escapeHtml(event.inferred_window || 'n/a')}</div></div>
+            <div class="detail-chip"><div class="detail-label">Inferred Topic</div><div class="detail-value">${escapeHtml(computedContext.topic || 'n/a')}</div></div>
+            <div class="detail-chip"><div class="detail-label">Transcript Window</div><div class="detail-value">${escapeHtml(computedContext.window || 'n/a')}</div></div>
           </div>
-          <div class="detail-value">${escapeHtml(event.inferred_transcript || 'n/a')}</div>
+          <div class="detail-value">${escapeHtml(computedContext.transcript || 'n/a')}</div>
 
           <div class="detail-section-title">Additional Fields</div>
           ${detailsHtml}
@@ -801,12 +907,222 @@
         document.querySelectorAll('.event-item').forEach(el => el.classList.remove('active'));
         const selectedEl = document.querySelector(`.event-item[data-index='${index}']`);
         if (selectedEl) selectedEl.classList.add('active');
+
+        const alignButton = document.getElementById('applyEventAlignment');
+        const alignInput = document.getElementById('alignTargetTime');
+        if (alignButton && alignInput) {
+          alignButton.addEventListener('click', () => {
+            const targetTime = Number(alignInput.value);
+            const eventBase = getEventBaseX(event);
+            if (!Number.isFinite(targetTime) || !Number.isFinite(eventBase)) {
+              return;
+            }
+            syncOffset(targetTime - eventBase);
+            showEventDetails(event.index);
+          });
+        }
       }
 
       const eventsData = {{ events|default([])|tojson }};
+      const transcriptSegments = {{ transcript_segments|default([])|tojson }};
+      const sourceVideoUrl = {{ video_url|default('')|tojson }};
+      const declaredVideoDuration = {{ video_duration_seconds|default('null')|tojson }};
       let timelineChart = null;
+      let minEventTime = 0;
       let maxEventTime = 0;
       let visibleEventIndexes = [];
+      let offsetSeconds = 0;
+      let selectedEventIndex = null;
+      let baseEventPoints = [];
+
+      function renderAnnotatedTimeline(intervals, sourceDuration) {
+        const host = document.getElementById('annotatedTimeline');
+        if (!host) return;
+
+        if (!Array.isArray(intervals) || intervals.length === 0 || !Number.isFinite(sourceDuration) || sourceDuration <= 0) {
+          host.innerHTML = '<div class="timeline-note">No keep intervals available.</div>';
+          return;
+        }
+
+        const bars = intervals.map(seg => {
+          const left = Math.max(0, (Number(seg.start) / sourceDuration) * 100);
+          const width = Math.max(0.5, ((Number(seg.end) - Number(seg.start)) / sourceDuration) * 100);
+          const reason = Array.isArray(seg.reasons) ? seg.reasons.join(' + ') : 'keep';
+          const color = reason.includes('transcript') && reason.includes('event')
+            ? 'linear-gradient(90deg, #22c55e, #0ea5e9)'
+            : (reason.includes('transcript') ? '#22c55e' : '#0ea5e9');
+          const label = `${Number(seg.start).toFixed(2)}s - ${Number(seg.end).toFixed(2)}s (${reason})`;
+          return `<div title="${label}" style="position:absolute;left:${left}%;width:${width}%;top:4px;height:18px;border-radius:6px;background:${color};opacity:0.92;"></div>`;
+        }).join('');
+
+        const ticks = [0, 0.25, 0.5, 0.75, 1].map(r => {
+          const s = (sourceDuration * r).toFixed(1);
+          return `<div style="font-size:0.76rem;color:#93c5fd;">${s}s</div>`;
+        }).join('');
+
+        host.innerHTML = `
+          <div style="position:relative;height:26px;background:rgba(30,41,59,0.65);border:1px solid rgba(148,163,184,0.25);border-radius:6px;overflow:hidden;">${bars}</div>
+          <div style="margin-top:0.35rem;display:flex;justify-content:space-between;">${ticks}</div>
+        `;
+      }
+
+      async function generateAutoEdit() {
+        const statusEl = document.getElementById('autoEditStatus');
+        const metricsEl = document.getElementById('autoEditMetrics');
+        const linkEl = document.getElementById('downloadAutoEditLink');
+        const previewEl = document.getElementById('autoEditPreview');
+        const progressWrap = document.getElementById('autoEditProgressWrap');
+        const progressBar = document.getElementById('autoEditProgressBar');
+        const progressText = document.getElementById('autoEditProgressText');
+
+        if (statusEl) statusEl.innerText = 'Generating auto-edited export...';
+        if (metricsEl) metricsEl.innerText = '';
+        if (linkEl) linkEl.style.display = 'none';
+        if (progressWrap) progressWrap.style.display = 'block';
+
+        let progressValue = 3;
+        if (progressBar) progressBar.style.width = `${progressValue}%`;
+        if (progressText) progressText.innerText = `${progressValue}%`;
+
+        const progressTimer = window.setInterval(() => {
+          progressValue = Math.min(92, progressValue + (progressValue < 40 ? 4 : (progressValue < 75 ? 2 : 0.6)));
+          if (progressBar) progressBar.style.width = `${progressValue}%`;
+          if (progressText) progressText.innerText = `${Math.floor(progressValue)}%`;
+        }, 280);
+
+        try {
+          const response = await fetch('/api/auto-edit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              video_url: sourceVideoUrl,
+              events: eventsData,
+              transcript_segments: transcriptSegments,
+              offset_seconds: offsetSeconds,
+            }),
+          });
+
+          const result = await response.json();
+          if (!response.ok) {
+            throw new Error(result.error || 'Auto-edit request failed');
+          }
+
+          window.clearInterval(progressTimer);
+          if (progressBar) progressBar.style.width = '100%';
+          if (progressText) progressText.innerText = '100%';
+
+          if (statusEl) statusEl.innerText = 'Auto-edited export ready.';
+          if (metricsEl) {
+            const kept = Number(result.kept_duration || 0).toFixed(2);
+            const src = Number(result.source_duration || 0).toFixed(2);
+            const pct = result.source_duration > 0
+              ? ((result.kept_duration / result.source_duration) * 100).toFixed(1)
+              : '0.0';
+            metricsEl.innerText = `Kept ${kept}s of ${src}s (${pct}%).`;
+          }
+
+          if (linkEl) {
+            linkEl.href = result.output_url;
+            linkEl.innerText = 'Download Export';
+            linkEl.style.display = 'inline-flex';
+          }
+
+          if (previewEl) {
+            previewEl.src = result.output_url;
+            previewEl.style.display = 'block';
+          }
+
+          renderAnnotatedTimeline(result.intervals, Number(result.source_duration || 0));
+        } catch (err) {
+          window.clearInterval(progressTimer);
+          if (progressBar) progressBar.style.width = '100%';
+          if (progressText) progressText.innerText = 'Failed';
+          if (statusEl) statusEl.innerText = `Auto-edit failed: ${err.message}`;
+        }
+      }
+
+      function findTranscriptMatchForTime(second, maxDistance = 2.0) {
+        if (!Number.isFinite(second) || !Array.isArray(transcriptSegments) || transcriptSegments.length === 0) {
+          return null;
+        }
+
+        for (const seg of transcriptSegments) {
+          const start = Number(seg.start);
+          const end = Number(seg.end);
+          if (Number.isFinite(start) && Number.isFinite(end) && start <= second && second <= end) {
+            return seg;
+          }
+        }
+
+        let nearest = null;
+        let nearestDistance = Number.POSITIVE_INFINITY;
+        for (const seg of transcriptSegments) {
+          const start = Number(seg.start);
+          const end = Number(seg.end);
+          if (!Number.isFinite(start) || !Number.isFinite(end)) {
+            continue;
+          }
+          const distance = Math.min(Math.abs(second - start), Math.abs(second - end));
+          if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearest = seg;
+          }
+        }
+
+        return nearestDistance <= maxDistance ? nearest : null;
+      }
+
+      function computeContextForEvent(event) {
+        const shiftedTime = getEventBaseX(event) + offsetSeconds;
+        const seg = findTranscriptMatchForTime(shiftedTime);
+        if (!seg) {
+          return {
+            topic: event.inferred_topic || 'n/a',
+            transcript: event.inferred_transcript || 'n/a',
+            window: event.inferred_window || 'n/a',
+            summary: event.inferred_summary || event.description || 'n/a',
+          };
+        }
+
+        const start = Number(seg.start);
+        const end = Number(seg.end);
+        return {
+          topic: seg.semantic_topic || event.inferred_topic || 'n/a',
+          transcript: seg.text || event.inferred_transcript || 'n/a',
+          window: Number.isFinite(start) && Number.isFinite(end)
+            ? `${start.toFixed(2)}s - ${end.toFixed(2)}s`
+            : (event.inferred_window || 'n/a'),
+          summary: seg.context_summary || event.inferred_summary || event.description || 'n/a',
+        };
+      }
+
+      function updateEventContextDisplays() {
+        document.querySelectorAll('.event-item').forEach(item => {
+          const idx = Number(item.dataset.index);
+          const event = eventsData.find(e => e.index === idx);
+          const contextEl = item.querySelector('.event-context');
+          if (!event || !contextEl) {
+            return;
+          }
+          const ctx = computeContextForEvent(event);
+          contextEl.innerText = ctx.topic;
+        });
+      }
+
+      function applyShiftedContextToEvents() {
+        for (const event of eventsData) {
+          const ctx = computeContextForEvent(event);
+          event.inferred_topic = ctx.topic;
+          event.inferred_transcript = ctx.transcript;
+          event.inferred_window = ctx.window;
+          event.inferred_summary = ctx.summary;
+        }
+
+        updateEventContextDisplays();
+        if (selectedEventIndex !== null) {
+          showEventDetails(selectedEventIndex);
+        }
+      }
 
       function updateEventCountHint() {
         const hintEl = document.getElementById('eventCountHint');
@@ -851,10 +1167,13 @@
           'flic_press': '#60a5fa',
           'light_change': '#facc15',
           'motion': '#34d399',
+          'transcript_start': '#f59e0b',
           'unknown': '#a78bfa',
         };
 
-        const eventPoints = eventsData.map(ev => {
+        const timelineEvents = eventsData.filter(ev => ev.include_in_timeline !== false);
+
+        baseEventPoints = timelineEvents.map(ev => {
           const x = ev.x_val != null ? ev.x_val : (ev.tsecs || ev.index);
           const type = ev.type || 'unknown';
           return {
@@ -868,8 +1187,15 @@
           };
         });
 
+        function shiftedPoints(offset) {
+          return baseEventPoints.map(pt => ({ ...pt, x: pt.x + offset }));
+        }
+
+        const eventPoints = shiftedPoints(0);
+
         const eventTimes = eventPoints.map(pt => pt.x);
-        maxEventTime = Math.max(...eventTimes, 0);
+        minEventTime = Math.min(...eventTimes, 0);
+        maxEventTime = Math.max(...eventTimes, 0, Number(declaredVideoDuration) || 0);
 
         const legendEl = document.getElementById('typeLegend');
         if (legendEl) {
@@ -929,9 +1255,9 @@
             scales: {
               x: {
                 type: 'linear',
-                min: 0,
+                min: Math.min(0, minEventTime),
                 max: Math.max(maxEventTime, 1),
-                title: { display: true, text: 'Seconds (from first event)', color: '#9ca3af' },
+                title: { display: true, text: 'Video Time (seconds)', color: '#9ca3af' },
                 ticks: { color: '#9ca3af', stepSize: Math.max(1, Math.floor(maxEventTime / 8)), },
                 grid: { color: 'rgba(148, 163, 184, 0.2)', borderColor: '#374151' }
               },
@@ -976,12 +1302,12 @@
               if (points.length) {
                 const hit = points.find(p => p.datasetIndex === 0);
                 if (!hit) return;
-                const idx = hit.index;
-                const ev = eventsData[idx];
+                const pointData = timelineChart.data.datasets[0].data[hit.index];
+                const ev = eventsData.find(e => e.index === pointData?.idx);
                 if (ev) {
                   showEventDetails(ev.index);
                   if (videoElement && ev.x_val != null && !isNaN(ev.x_val)) {
-                    videoElement.currentTime = ev.x_val;
+                    videoElement.currentTime = Math.max(0, ev.x_val + offsetSeconds);
                     videoElement.pause();
                   }
                 }
@@ -997,11 +1323,116 @@
             showEventDetails(idx);
             const ev = eventsData.find(e => e.index === idx);
             if (videoElement && ev && ev.x_val != null && !isNaN(ev.x_val)) {
-              videoElement.currentTime = ev.x_val;
+              videoElement.currentTime = Math.max(0, ev.x_val + offsetSeconds);
               videoElement.pause();
             }
           });
         });
+
+        function rebuildChart(offset, previousOffset = offset) {
+          if (!timelineChart) return;
+          const scaleX = timelineChart.scales?.x;
+          const currentMin = Number(scaleX?.min);
+          const currentMax = Number(scaleX?.max);
+          const currentRange = Number.isFinite(currentMin) && Number.isFinite(currentMax)
+            ? currentMax - currentMin
+            : null;
+
+          const pts = shiftedPoints(offset);
+          const times = pts.map(p => p.x);
+          const newMin = Math.min(...times, 0);
+          const newMax = Math.max(...times, 0, Number(declaredVideoDuration) || 0);
+
+          const wasZoomed = currentRange !== null && (currentRange < (maxEventTime - minEventTime) - 0.001);
+          const deltaShift = offset - previousOffset;
+          let nextMin = newMin;
+          let nextMax = Math.max(newMax, 1);
+          if (wasZoomed && Number.isFinite(currentMin) && Number.isFinite(currentMax)) {
+            nextMin = currentMin + deltaShift;
+            nextMax = currentMax + deltaShift;
+          }
+
+          minEventTime = newMin;
+          maxEventTime = newMax;
+          timelineChart.data.datasets[0].data = pts;
+          timelineChart.data.datasets[1].data = [{ x: newMin, y: 1 }, { x: newMax, y: 1 }];
+          timelineChart.options.scales.x.min = nextMin;
+          timelineChart.options.scales.x.max = nextMax;
+          timelineChart.update('none');
+
+          updateEventListTimelineLabels();
+          updateEventContextDisplays();
+          if (selectedEventIndex !== null) {
+            showEventDetails(selectedEventIndex);
+          }
+
+          const hint = document.getElementById('offsetHint');
+          if (hint) hint.innerText = offset === 0
+            ? 'Drag the slider to shift all event markers left / right and align the log with the video.'
+            : `Events shifted by ${offset > 0 ? '+' : ''}${offset.toFixed(2)}s from calculated position.`;
+        }
+
+        const offsetSlider = document.getElementById('offsetSlider');
+        const offsetNumber = document.getElementById('offsetNumber');
+        const offsetReset = document.getElementById('offsetReset');
+        const applyShiftedContextBtn = document.getElementById('applyShiftedContext');
+        const generateAutoEditBtn = document.getElementById('generateAutoEditBtn');
+
+        function syncOffset(value) {
+          const previousOffset = offsetSeconds;
+          offsetSeconds = parseFloat(value) || 0;
+          if (offsetSlider) offsetSlider.value = offsetSeconds;
+          if (offsetNumber) offsetNumber.value = offsetSeconds;
+          rebuildChart(offsetSeconds, previousOffset);
+        }
+
+        if (offsetSlider) offsetSlider.addEventListener('input', e => syncOffset(e.target.value));
+        if (offsetNumber) offsetNumber.addEventListener('input', e => syncOffset(e.target.value));
+        if (offsetReset) offsetReset.addEventListener('click', () => syncOffset(0));
+        if (applyShiftedContextBtn) applyShiftedContextBtn.addEventListener('click', applyShiftedContextToEvents);
+        if (generateAutoEditBtn) generateAutoEditBtn.addEventListener('click', generateAutoEdit);
+
+        const chartCanvas = timelineChart?.canvas;
+        if (chartCanvas) {
+          let shiftDragging = false;
+          let dragStartXValue = 0;
+          let dragStartOffset = 0;
+
+          chartCanvas.addEventListener('mousedown', (event) => {
+            if (!event.shiftKey) {
+              return;
+            }
+            const scaleX = timelineChart.scales?.x;
+            if (!scaleX) {
+              return;
+            }
+            shiftDragging = true;
+            dragStartXValue = scaleX.getValueForPixel(event.offsetX);
+            dragStartOffset = offsetSeconds;
+            event.preventDefault();
+          });
+
+          chartCanvas.addEventListener('mousemove', (event) => {
+            if (!shiftDragging) {
+              return;
+            }
+            const scaleX = timelineChart.scales?.x;
+            if (!scaleX) {
+              return;
+            }
+            const currentXValue = scaleX.getValueForPixel(event.offsetX);
+            const delta = currentXValue - dragStartXValue;
+            syncOffset(dragStartOffset + delta);
+          });
+
+          chartCanvas.addEventListener('mouseup', () => {
+            shiftDragging = false;
+          });
+
+          chartCanvas.addEventListener('mouseleave', () => {
+            shiftDragging = false;
+          });
+        }
 
         const searchInput = document.getElementById('eventSearch');
         const typeFilter = document.getElementById('eventTypeFilter');
@@ -1013,6 +1444,8 @@
         }
 
         applyEventFilters();
+        updateEventListTimelineLabels();
+        updateEventContextDisplays();
 
         // Pick first by default
         showEventDetails(eventsData[0].index);
