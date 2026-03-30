@@ -4,12 +4,33 @@ import json
 import datetime
 import os
 
-HA_URL = "http://homeassistant.local:8123"
-TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiI1ZTYxYzgwODY5NjY0ZjZkODQ1YjY5NTZkZWRiMDI2YiIsImlhdCI6MTc3MzMyMTQ4MCwiZXhwIjoyMDg4NjgxNDgwfQ.QPcRgynFSwWlpP0t1HuHg-nECBoyfA43-bGYCzepm2A"
-LIGHT_ENTITY_ID = "light.eveready_rgbcct_led_bc_gls"
-FLIC_ENTITY_ID = "binary_sensor.flic_80e4da79f712"
-TAPO_ENTITY_ID = "switch.tapo_P110"
-LOG_DIR = "home_assistant_logs"
+def load_env_file(file_path):
+    if not os.path.exists(file_path):
+        return
+
+    with open(file_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            os.environ.setdefault(key, value)
+
+
+ENV_PATH = os.path.join(os.path.dirname(__file__), ".env")
+load_env_file(ENV_PATH)
+
+HA_URL = os.getenv("HA_URL", "http://homeassistant.local:8123")
+TOKEN = os.getenv("HA_TOKEN")
+LIGHT_ENTITY_ID = os.getenv("LIGHT_ENTITY_ID", "light.eveready_rgbcct_led_bc_gls")
+FLIC_ENTITY_ID = os.getenv("FLIC_ENTITY_ID", "binary_sensor.flic_80e4da79f712")
+TAPO_ENTITY_ID = os.getenv("TAPO_ENTITY_ID", "switch.tapo_P110")
+LOG_DIR = os.getenv("LOG_DIR", "home_assistant_logs")
+
+if not TOKEN:
+    raise RuntimeError("Missing HA_TOKEN. Set it in environment or MetadataCollection/.env")
 
 # Create logs directory if it doesn't exist
 os.makedirs(LOG_DIR, exist_ok=True)

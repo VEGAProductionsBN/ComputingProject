@@ -3,3 +3,15 @@ venv/
 __pycache__/
 *.pyc
 static/uploads/
+
+# Local secrets / environment files
+.env
+.env.*
+MetadataCollection/.env
+MetadataCollection/*.secret
+*.key
+*.pem
+
+# Keep template env files in git
+!.env.example
+!MetadataCollection/.env.example
