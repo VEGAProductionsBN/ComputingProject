@@ -3,8 +3,11 @@ import json
 import re
 import math
 import time
+import csv
+import zipfile
 from pathlib import Path
 from datetime import datetime
+import xml.etree.ElementTree as ET
 from flask import Flask, request, render_template, redirect, url_for, flash, jsonify
 from werkzeug.utils import secure_filename
 from hachoir.parser import createParser
@@ -442,19 +445,7 @@ def merge_intervals(intervals):
 
 def build_autoedit_intervals(events, transcript_segments, duration_seconds, offset_seconds=0.0):
     intervals = []
-
-    # Keep all spoken transcript windows.
-    for seg in transcript_segments or []:
-        try:
-            start = max(0.0, float(seg.get("start", 0.0)))
-            end = min(duration_seconds, float(seg.get("end", start)))
-        except (TypeError, ValueError):
-            continue
-        if end <= start:
-            continue
-        intervals.append({"start": start, "end": end, "reasons": {"transcript"}})
-
-    # Keep windows around important events.
+    # Keep only transcript windows that are near important events.
     for event in events or []:
         if event.get("include_in_timeline") is False:
             continue
@@ -471,11 +462,27 @@ def build_autoedit_intervals(events, transcript_segments, duration_seconds, offs
         if not math.isfinite(x):
             continue
 
-        start = max(0.0, x - 1.2)
-        end = min(duration_seconds, x + 2.0)
-        if end <= start:
-            continue
-        intervals.append({"start": start, "end": end, "reasons": {"event"}})
+        for seg in transcript_segments or []:
+            try:
+                seg_start = float(seg.get("start", 0.0))
+                seg_end = float(seg.get("end", seg_start))
+            except (TypeError, ValueError):
+                continue
+
+            if seg_end <= seg_start:
+                continue
+
+            # Keep transcript if event lands inside it or close to its edges.
+            proximity_padding = 2.0
+            if x < (seg_start - proximity_padding) or x > (seg_end + proximity_padding):
+                continue
+
+            start = max(0.0, seg_start)
+            end = min(duration_seconds, seg_end)
+            if end <= start:
+                continue
+
+            intervals.append({"start": start, "end": end, "reasons": {"transcript_near_event"}})
 
     merged = merge_intervals(intervals)
     compact = []
@@ -486,6 +493,209 @@ def build_autoedit_intervals(events, transcript_segments, duration_seconds, offs
             "reasons": sorted(item.get("reasons", set())),
         })
     return compact
+
+
+def build_interval_event_contexts(intervals, events, offset_seconds=0.0):
+    enriched = []
+    for idx, interval in enumerate(intervals or [], start=1):
+        try:
+            start = float(interval.get("start", 0.0))
+            end = float(interval.get("end", start))
+        except (TypeError, ValueError):
+            continue
+
+        if end <= start:
+            continue
+
+        contexts = []
+        seen = set()
+        for event in events or []:
+            if event.get("include_in_timeline") is False:
+                continue
+
+            base_x = event.get("x_val")
+            if base_x is None:
+                continue
+
+            try:
+                event_time = float(base_x) + float(offset_seconds)
+            except (TypeError, ValueError):
+                continue
+
+            if not math.isfinite(event_time) or event_time < start or event_time > end:
+                continue
+
+            event_type = str(event.get("type", "unknown")).replace("_", " ")
+            summary = str(
+                event.get("inferred_summary")
+                or event.get("inferred_topic")
+                or event.get("description")
+                or "context unavailable"
+            ).strip()
+
+            dedupe_key = (
+                event.get("index"),
+                round(event_time, 3),
+                event_type,
+                summary,
+            )
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+
+            contexts.append({
+                "event_index": event.get("index"),
+                "event_time": round(event_time, 3),
+                "event_type": event_type,
+                "summary": summary,
+            })
+
+        enriched.append({
+            "segment_id": idx,
+            "start": round(start, 3),
+            "end": round(end, 3),
+            "reasons": interval.get("reasons", []),
+            "event_count": len(contexts),
+            "event_contexts": contexts,
+        })
+
+    return enriched
+
+
+def write_timeline_csv(csv_path, interval_contexts):
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "segment_id",
+            "start_seconds",
+            "end_seconds",
+            "duration_seconds",
+            "reasons",
+            "event_count",
+            "event_context",
+        ])
+
+        for item in interval_contexts or []:
+            start = float(item.get("start", 0.0))
+            end = float(item.get("end", start))
+            contexts = item.get("event_contexts", [])
+            context_text = " | ".join(
+                f"{c.get('event_type', 'unknown')} @ {float(c.get('event_time', 0.0)):.3f}s: {c.get('summary', '')}"
+                for c in contexts
+            )
+            writer.writerow([
+                item.get("segment_id"),
+                round(start, 3),
+                round(end, 3),
+                round(max(0.0, end - start), 3),
+                " + ".join(item.get("reasons", [])),
+                item.get("event_count", 0),
+                context_text,
+            ])
+
+
+def write_elan_file(eaf_path, media_filename, interval_contexts):
+    root = ET.Element(
+        "ANNOTATION_DOCUMENT",
+        {
+            "AUTHOR": "",
+            "DATE": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "FORMAT": "3.0",
+            "VERSION": "3.0",
+        },
+    )
+
+    header = ET.SubElement(root, "HEADER", {"MEDIA_FILE": "", "TIME_UNITS": "milliseconds"})
+    ET.SubElement(
+        header,
+        "MEDIA_DESCRIPTOR",
+        {
+            "MEDIA_URL": f"file://{media_filename}",
+            "MIME_TYPE": "video/mp4",
+            "RELATIVE_MEDIA_URL": media_filename,
+        },
+    )
+    ET.SubElement(header, "PROPERTY", {"NAME": "auto_edit_export"}).text = "EventSync auto-edit timeline"
+
+    times_ms = set()
+    for item in interval_contexts or []:
+        start_ms = max(0, int(round(float(item.get("start", 0.0)) * 1000)))
+        end_ms = max(start_ms + 1, int(round(float(item.get("end", 0.0)) * 1000)))
+        times_ms.add(start_ms)
+        times_ms.add(end_ms)
+
+    time_order = ET.SubElement(root, "TIME_ORDER")
+    slot_by_time = {}
+    for idx, t in enumerate(sorted(times_ms), start=1):
+        slot_id = f"ts{idx}"
+        slot_by_time[t] = slot_id
+        ET.SubElement(time_order, "TIME_SLOT", {"TIME_SLOT_ID": slot_id, "TIME_VALUE": str(t)})
+
+    tier = ET.SubElement(
+        root,
+        "TIER",
+        {
+            "LINGUISTIC_TYPE_REF": "default-lt",
+            "TIER_ID": "AutoEditTimeline",
+        },
+    )
+
+    for idx, item in enumerate(interval_contexts or [], start=1):
+        start_ms = max(0, int(round(float(item.get("start", 0.0)) * 1000)))
+        end_ms = max(start_ms + 1, int(round(float(item.get("end", 0.0)) * 1000)))
+        ann = ET.SubElement(tier, "ANNOTATION")
+        alignable = ET.SubElement(
+            ann,
+            "ALIGNABLE_ANNOTATION",
+            {
+                "ANNOTATION_ID": f"a{idx}",
+                "TIME_SLOT_REF1": slot_by_time[start_ms],
+                "TIME_SLOT_REF2": slot_by_time[end_ms],
+            },
+        )
+
+        contexts = item.get("event_contexts", [])
+        context_text = "; ".join(
+            f"{c.get('event_type', 'unknown')} @ {float(c.get('event_time', 0.0)):.2f}s: {c.get('summary', '')}"
+            for c in contexts
+        )
+        if not context_text:
+            context_text = "No matched event context"
+
+        reasons = " + ".join(item.get("reasons", [])) or "keep"
+        ET.SubElement(alignable, "ANNOTATION_VALUE").text = (
+            f"[{item.get('start', 0.0):.3f}s-{item.get('end', 0.0):.3f}s] "
+            f"reasons={reasons}; context={context_text}"
+        )
+
+    ET.SubElement(root, "LINGUISTIC_TYPE", {
+        "GRAPHIC_REFERENCES": "false",
+        "LINGUISTIC_TYPE_ID": "default-lt",
+        "TIME_ALIGNABLE": "true",
+    })
+
+    ET.SubElement(root, "LOCALE", {"COUNTRY_CODE": "US", "LANGUAGE_CODE": "en"})
+    ET.SubElement(root, "CONSTRAINT", {
+        "DESCRIPTION": "Time subdivision of parent annotation's time interval, no time gaps allowed within this interval",
+        "STEREOTYPE": "Time_Subdivision",
+    })
+    ET.SubElement(root, "CONSTRAINT", {
+        "DESCRIPTION": "Symbolic subdivision of a parent annotation. Annotations refering to the same parent are ordered",
+        "STEREOTYPE": "Symbolic_Subdivision",
+    })
+    ET.SubElement(root, "CONSTRAINT", {
+        "DESCRIPTION": "1-1 association with a parent annotation",
+        "STEREOTYPE": "Symbolic_Association",
+    })
+    ET.SubElement(root, "CONSTRAINT", {
+        "DESCRIPTION": "Time alignable annotations within the parent annotation's time interval, gaps are allowed",
+        "STEREOTYPE": "Included_In",
+    })
+
+    tree = ET.ElementTree(root)
+    if hasattr(ET, "indent"):
+        ET.indent(tree, space="  ")
+    tree.write(eaf_path, encoding="utf-8", xml_declaration=True)
 
 
 def make_subclip(clip, start_time, end_time):
@@ -559,6 +769,25 @@ def api_auto_edit():
 
         kept_duration = round(sum(seg["end"] - seg["start"] for seg in intervals), 3)
 
+        interval_contexts = build_interval_event_contexts(intervals, events, offset_seconds)
+
+        export_stem = Path(out_name).stem
+        csv_name = f"{export_stem}_timeline.csv"
+        eaf_name = f"{export_stem}.eaf"
+        zip_name = f"{export_stem}_elan_package.zip"
+
+        csv_path = UPLOAD_FOLDER / csv_name
+        eaf_path = UPLOAD_FOLDER / eaf_name
+        zip_path = UPLOAD_FOLDER / zip_name
+
+        write_timeline_csv(csv_path, interval_contexts)
+        write_elan_file(eaf_path, out_name, interval_contexts)
+
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.write(out_path, arcname=out_name)
+            zf.write(csv_path, arcname=csv_name)
+            zf.write(eaf_path, arcname=eaf_name)
+
         final_clip.close()
         for part in parts:
             part.close()
@@ -567,8 +796,12 @@ def api_auto_edit():
         return jsonify({
             "output_url": f"{url_for('static', filename=f'uploads/{out_name}')}?v={int(time.time())}",
             "intervals": intervals,
+            "interval_annotations": interval_contexts,
             "kept_duration": kept_duration,
             "source_duration": round(duration_seconds, 3),
+            "timeline_csv_url": f"{url_for('static', filename=f'uploads/{csv_name}')}?v={int(time.time())}",
+            "elan_url": f"{url_for('static', filename=f'uploads/{eaf_name}')}?v={int(time.time())}",
+            "package_url": f"{url_for('static', filename=f'uploads/{zip_name}')}?v={int(time.time())}",
         })
     except Exception as exc:
         return jsonify({"error": f"Auto-edit failed: {exc}"}), 500

@@ -708,10 +708,13 @@
         <div class="card">
           <div class="card-body">
             <h2 class="section-title">Auto-Edit Export</h2>
-            <div class="section-caption">Create an automatically edited export that keeps transcript and event windows, then review the annotated keep timeline.</div>
+            <div class="section-caption">Create an automatically edited export that keeps transcript around metadata events, then review the annotated keep timeline.</div>
             <div class="control-row" style="margin-bottom:0.5rem;">
               <button id="generateAutoEditBtn" type="button" class="btn btn-primary">Generate Auto-Edited Video</button>
               <a id="downloadAutoEditLink" class="btn btn-outline-light" style="display:none;" download>Download Export</a>
+              <a id="downloadElanLink" class="btn btn-outline-info" style="display:none;" download>Download ELAN (.eaf)</a>
+              <a id="downloadTimelineCsvLink" class="btn btn-outline-info" style="display:none;" download>Download Timeline (.csv)</a>
+              <a id="downloadAutoEditPackageLink" class="btn btn-outline-success" style="display:none;" download>Download ELAN Package (.zip)</a>
             </div>
             <div id="autoEditStatus" class="timeline-note">No export generated yet.</div>
             <div id="autoEditMetrics" class="timeline-note mt-1"></div>
@@ -935,7 +938,34 @@
       let selectedEventIndex = null;
       let baseEventPoints = [];
 
-      function renderAnnotatedTimeline(intervals, sourceDuration) {
+      function collectIntervalEventContexts(interval, allEvents) {
+        const start = Number(interval?.start);
+        const end = Number(interval?.end);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+          return [];
+        }
+
+        const matches = [];
+        for (const event of allEvents || []) {
+          if (event?.include_in_timeline === false) {
+            continue;
+          }
+
+          const shiftedTime = getEventBaseX(event) + offsetSeconds;
+          if (!Number.isFinite(shiftedTime) || shiftedTime < start || shiftedTime > end) {
+            continue;
+          }
+
+          const ctx = computeContextForEvent(event);
+          const eventType = String(event?.type || 'unknown').replaceAll('_', ' ');
+          const summary = ctx.summary || ctx.topic || event.description || 'context unavailable';
+          matches.push(`${eventType} @ ${shiftedTime.toFixed(2)}s: ${summary}`);
+        }
+
+        return Array.from(new Set(matches));
+      }
+
+      function renderAnnotatedTimeline(intervals, sourceDuration, allEvents) {
         const host = document.getElementById('annotatedTimeline');
         if (!host) return;
 
@@ -944,6 +974,13 @@
           return;
         }
 
+        const escapeAttr = (value) => String(value)
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#39;');
+
         const bars = intervals.map(seg => {
           const left = Math.max(0, (Number(seg.start) / sourceDuration) * 100);
           const width = Math.max(0.5, ((Number(seg.end) - Number(seg.start)) / sourceDuration) * 100);
@@ -951,8 +988,22 @@
           const color = reason.includes('transcript') && reason.includes('event')
             ? 'linear-gradient(90deg, #22c55e, #0ea5e9)'
             : (reason.includes('transcript') ? '#22c55e' : '#0ea5e9');
-          const label = `${Number(seg.start).toFixed(2)}s - ${Number(seg.end).toFixed(2)}s (${reason})`;
-          return `<div title="${label}" style="position:absolute;left:${left}%;width:${width}%;top:4px;height:18px;border-radius:6px;background:${color};opacity:0.92;"></div>`;
+          const contexts = collectIntervalEventContexts(seg, allEvents);
+          const hoverLines = [
+            `${Number(seg.start).toFixed(2)}s - ${Number(seg.end).toFixed(2)}s`,
+            `Reason: ${reason}`,
+          ];
+          if (contexts.length > 0) {
+            hoverLines.push('Event Context:');
+            hoverLines.push(...contexts.slice(0, 4));
+            if (contexts.length > 4) {
+              hoverLines.push(`...and ${contexts.length - 4} more`);
+            }
+          } else {
+            hoverLines.push('Event Context: none');
+          }
+          const label = escapeAttr(hoverLines.join('\n'));
+          return `<div class="annotated-segment" data-tooltip="${label}" style="position:absolute;left:${left}%;width:${width}%;top:4px;height:18px;border-radius:6px;background:${color};opacity:0.92;cursor:pointer;"></div>`;
         }).join('');
 
         const ticks = [0, 0.25, 0.5, 0.75, 1].map(r => {
@@ -961,15 +1012,64 @@
         }).join('');
 
         host.innerHTML = `
-          <div style="position:relative;height:26px;background:rgba(30,41,59,0.65);border:1px solid rgba(148,163,184,0.25);border-radius:6px;overflow:hidden;">${bars}</div>
+          <div id="annotatedTrack" style="position:relative;height:26px;background:rgba(30,41,59,0.65);border:1px solid rgba(148,163,184,0.25);border-radius:6px;overflow:visible;">${bars}</div>
           <div style="margin-top:0.35rem;display:flex;justify-content:space-between;">${ticks}</div>
+          <div id="annotatedTooltip" style="display:none;position:absolute;z-index:30;max-width:560px;background:rgba(2,8,23,0.96);border:1px solid rgba(56,189,248,0.45);border-radius:6px;padding:0.45rem 0.55rem;color:#e2e8f0;font-size:0.78rem;line-height:1.35;white-space:pre-line;pointer-events:none;box-shadow:0 8px 22px rgba(2,8,23,0.55);"></div>
         `;
+
+        host.style.position = 'relative';
+        const tooltipEl = document.getElementById('annotatedTooltip');
+        const segments = host.querySelectorAll('.annotated-segment');
+
+        const hideTooltip = () => {
+          if (tooltipEl) {
+            tooltipEl.style.display = 'none';
+          }
+        };
+
+        const placeTooltip = (evt) => {
+          if (!tooltipEl) {
+            return;
+          }
+          const hostRect = host.getBoundingClientRect();
+          const x = evt.clientX - hostRect.left + 12;
+          const y = evt.clientY - hostRect.top - 10;
+          tooltipEl.style.left = `${Math.max(0, x)}px`;
+          tooltipEl.style.top = `${Math.max(0, y)}px`;
+          const maxLeft = Math.max(0, host.clientWidth - tooltipEl.offsetWidth - 6);
+          const currentLeft = parseFloat(tooltipEl.style.left) || 0;
+          if (currentLeft > maxLeft) {
+            tooltipEl.style.left = `${maxLeft}px`;
+          }
+        };
+
+        segments.forEach(segEl => {
+          segEl.addEventListener('mouseenter', (evt) => {
+            if (!tooltipEl) {
+              return;
+            }
+            tooltipEl.textContent = segEl.dataset.tooltip || 'No context available';
+            tooltipEl.style.display = 'block';
+            placeTooltip(evt);
+          });
+
+          segEl.addEventListener('mousemove', (evt) => {
+            placeTooltip(evt);
+          });
+
+          segEl.addEventListener('mouseleave', hideTooltip);
+        });
+
+        host.addEventListener('mouseleave', hideTooltip);
       }
 
       async function generateAutoEdit() {
         const statusEl = document.getElementById('autoEditStatus');
         const metricsEl = document.getElementById('autoEditMetrics');
         const linkEl = document.getElementById('downloadAutoEditLink');
+        const elanLinkEl = document.getElementById('downloadElanLink');
+        const timelineCsvLinkEl = document.getElementById('downloadTimelineCsvLink');
+        const packageLinkEl = document.getElementById('downloadAutoEditPackageLink');
         const previewEl = document.getElementById('autoEditPreview');
         const progressWrap = document.getElementById('autoEditProgressWrap');
         const progressBar = document.getElementById('autoEditProgressBar');
@@ -978,6 +1078,9 @@
         if (statusEl) statusEl.innerText = 'Generating auto-edited export...';
         if (metricsEl) metricsEl.innerText = '';
         if (linkEl) linkEl.style.display = 'none';
+        if (elanLinkEl) elanLinkEl.style.display = 'none';
+        if (timelineCsvLinkEl) timelineCsvLinkEl.style.display = 'none';
+        if (packageLinkEl) packageLinkEl.style.display = 'none';
         if (progressWrap) progressWrap.style.display = 'block';
 
         let progressValue = 3;
@@ -1023,8 +1126,26 @@
 
           if (linkEl) {
             linkEl.href = result.output_url;
-            linkEl.innerText = 'Download Export';
+            linkEl.innerText = 'Download Video';
             linkEl.style.display = 'inline-flex';
+          }
+
+          if (elanLinkEl && result.elan_url) {
+            elanLinkEl.href = result.elan_url;
+            elanLinkEl.innerText = 'Download ELAN (.eaf)';
+            elanLinkEl.style.display = 'inline-flex';
+          }
+
+          if (timelineCsvLinkEl && result.timeline_csv_url) {
+            timelineCsvLinkEl.href = result.timeline_csv_url;
+            timelineCsvLinkEl.innerText = 'Download Timeline (.csv)';
+            timelineCsvLinkEl.style.display = 'inline-flex';
+          }
+
+          if (packageLinkEl && result.package_url) {
+            packageLinkEl.href = result.package_url;
+            packageLinkEl.innerText = 'Download ELAN Package (.zip)';
+            packageLinkEl.style.display = 'inline-flex';
           }
 
           if (previewEl) {
@@ -1032,7 +1153,7 @@
             previewEl.style.display = 'block';
           }
 
-          renderAnnotatedTimeline(result.intervals, Number(result.source_duration || 0));
+          renderAnnotatedTimeline(result.intervals, Number(result.source_duration || 0), eventsData);
         } catch (err) {
           window.clearInterval(progressTimer);
           if (progressBar) progressBar.style.width = '100%';
