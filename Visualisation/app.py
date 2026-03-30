@@ -1,12 +1,19 @@
 import os
 import json
+import re
+import math
+import time
+import csv
+import zipfile
 from pathlib import Path
 from datetime import datetime
-from flask import Flask, request, render_template, redirect, url_for, flash
+import xml.etree.ElementTree as ET
+from flask import Flask, request, render_template, redirect, url_for, flash, jsonify
 from werkzeug.utils import secure_filename
 from hachoir.parser import createParser
 from hachoir.metadata import extractMetadata
 from moviepy.video.io.VideoFileClip import VideoFileClip
+from moviepy import concatenate_videoclips
 from faster_whisper import WhisperModel
 import tempfile
 
@@ -26,6 +33,7 @@ def get_whisper_model():
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_FOLDER = BASE_DIR / "static" / "uploads"
+LOG_FOLDER = BASE_DIR.parent / "home_assistant_logs"
 
 # Clear any existing files on first startup
 if UPLOAD_FOLDER.exists():
@@ -44,6 +52,16 @@ ALLOWED_VIDEO_EXTENSIONS = {"mp4", "mov", "webm", "ogg", "mkv"}
 
 def allowed_file(filename, allowed_exts):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in allowed_exts
+
+
+def get_available_logs():
+    """List available JSON/JSONL files from the logs folder."""
+    available = []
+    if LOG_FOLDER.exists() and LOG_FOLDER.is_dir():
+        for file_path in sorted(LOG_FOLDER.glob("*")):
+            if file_path.is_file() and allowed_file(file_path.name, ALLOWED_JSON_EXTENSIONS):
+                available.append({"name": file_path.name, "path": str(file_path)})
+    return available
 
 
 def generate_jsonl_from_video(video_path):
@@ -108,6 +126,90 @@ def extract_transcript_segments(records):
     return segments
 
 
+def parse_duration_to_seconds(duration_text):
+    """Parse strings like '41 sec 60 ms' into total seconds."""
+    if not duration_text:
+        return None
+
+    text = str(duration_text).strip().lower()
+    if not text:
+        return None
+
+    total = 0.0
+
+    hour_match = re.search(r"([\d.]+)\s*h(?:ours?)?", text)
+    minute_match = re.search(r"([\d.]+)\s*min(?:utes?)?", text)
+    second_match = re.search(r"([\d.]+)\s*sec(?:onds?)?", text)
+    ms_match = re.search(r"([\d.]+)\s*ms", text)
+
+    if hour_match:
+        total += float(hour_match.group(1)) * 3600
+    if minute_match:
+        total += float(minute_match.group(1)) * 60
+    if second_match:
+        total += float(second_match.group(1))
+    if ms_match:
+        total += float(ms_match.group(1)) / 1000.0
+
+    return total if total > 0 else None
+
+
+def extract_video_duration_seconds(records):
+    if not isinstance(records, list):
+        return None
+
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("field", "")).strip().lower() != "- duration":
+            continue
+        duration_seconds = parse_duration_to_seconds(record.get("value"))
+        if duration_seconds is not None:
+            return duration_seconds
+    return None
+
+
+def extract_video_creation_datetime(records):
+    if not isinstance(records, list):
+        return None
+
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("field", "")).strip().lower() != "- creation date":
+            continue
+
+        value = str(record.get("value", "")).strip()
+        if not value:
+            continue
+
+        try:
+            return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except Exception:
+                return None
+
+    return None
+
+
+def choose_clip_window(event_list, creation_dt, duration_seconds):
+    """Derive the clip window from the creation datetime and duration.
+
+    The creation date reported by video metadata is the time the file was
+    finalised (recording ended), not when recording began.  Subtracting the
+    duration gives the true recording start time.
+    """
+    if creation_dt is None or duration_seconds is None or duration_seconds <= 0:
+        return None, None, None
+
+    creation_epoch = creation_dt.timestamp()
+    clip_start = creation_epoch - duration_seconds
+    clip_end = creation_epoch
+    return clip_start, clip_end, "creation_as_end"
+
+
 def shorten_topic(text, max_words=12):
     words = text.split()
     if len(words) <= max_words:
@@ -115,7 +217,7 @@ def shorten_topic(text, max_words=12):
     return " ".join(words[:max_words]) + "..."
 
 
-def match_transcript_segment(second, segments, max_distance=8.0):
+def match_transcript_segment(second, segments, max_distance=2.0):
     if second is None or not segments:
         return None
 
@@ -129,6 +231,159 @@ def match_transcript_segment(second, segments, max_distance=8.0):
     )
     distance = min(abs(second - nearest["start"]), abs(second - nearest["end"]))
     return nearest if distance <= max_distance else None
+
+
+def tokenize_text(text):
+    return re.findall(r"[a-zA-Z0-9']+", str(text).lower())
+
+
+def build_transcript_idf(segments):
+    """Build a lightweight transcript-specific IDF map for semantic scoring."""
+    stopwords = {
+        "the", "a", "an", "and", "or", "to", "of", "in", "on", "for", "with",
+        "is", "it", "this", "that", "we", "i", "im", "you", "now", "will",
+        "be", "as", "are", "was", "were", "by", "at", "from", "so", "then",
+    }
+
+    total_docs = max(1, len(segments))
+    doc_freq = {}
+    for seg in segments:
+        tokens = {t for t in tokenize_text(seg.get("text", "")) if len(t) > 2 and t not in stopwords}
+        for token in tokens:
+            doc_freq[token] = doc_freq.get(token, 0) + 1
+
+    idf = {}
+    for token, df in doc_freq.items():
+        idf[token] = 1.0 + (total_docs / max(1, df))
+    return idf
+
+
+def infer_semantic_topic(tokens, intent, idf_map):
+    """Infer higher-level semantic topic from transcript language patterns."""
+    topic_rules = {
+        "Session Initialization and Baseline Capture": {
+            "start", "session", "initial", "begin", "metadata", "process", "logs"
+        },
+        "Interactive Device Control Sequence": {
+            "press", "click", "button", "turn", "switch", "on", "off", "control"
+        },
+        "Lighting and Color Calibration": {
+            "brightness", "light", "color", "temperature", "hs", "warm", "cool"
+        },
+        "Session Wrap-Up and Recording End": {
+            "end", "finish", "stop", "done", "video", "recording"
+        },
+    }
+
+    intent_hint = {
+        "session_setup": "Session Initialization and Baseline Capture",
+        "device_control": "Interactive Device Control Sequence",
+        "light_adjustment": "Lighting and Color Calibration",
+        "session_end": "Session Wrap-Up and Recording End",
+    }.get(intent)
+
+    scores = {}
+    for topic, rule_words in topic_rules.items():
+        overlap = rule_words.intersection(tokens)
+        weighted = sum(idf_map.get(token, 1.0) for token in overlap)
+        if topic == intent_hint:
+            weighted += 2.0
+        scores[topic] = weighted
+
+    best_topic = max(scores, key=scores.get)
+    if scores[best_topic] <= 0:
+        ranked_tokens = sorted(tokens, key=lambda token: idf_map.get(token, 1.0), reverse=True)
+        fallback_keywords = [t for t in ranked_tokens if len(t) > 2][:3]
+        if fallback_keywords:
+            fallback_topic = f"Narration about {' and '.join(fallback_keywords)}"
+            return fallback_topic, 0.2, fallback_keywords
+        return "Uncategorized spoken activity", 0.0, []
+
+    cue_tokens = sorted(
+        topic_rules[best_topic].intersection(tokens),
+        key=lambda token: idf_map.get(token, 1.0),
+        reverse=True,
+    )[:3]
+    return best_topic, round(scores[best_topic], 3), cue_tokens
+
+
+def infer_segment_intent(tokens):
+    intent_rules = {
+        "session_setup": {"start", "session", "initial", "begin"},
+        "device_control": {"turn", "on", "off", "switch", "click", "button", "press"},
+        "light_adjustment": {"brightness", "color", "light", "temperature", "hs"},
+        "session_end": {"end", "finish", "stop", "done", "complete"},
+    }
+
+    scores = {
+        intent: len(rule_words.intersection(tokens))
+        for intent, rule_words in intent_rules.items()
+    }
+    best_intent = max(scores, key=scores.get)
+    return best_intent if scores[best_intent] > 0 else "narration"
+
+
+def enrich_transcript_segments(segments):
+    if not segments:
+        return []
+
+    idf_map = build_transcript_idf(segments)
+
+    action_words = {
+        "start", "press", "click", "turn", "change", "adjust", "end", "stop", "record", "recording"
+    }
+    entity_words = {
+        "light", "brightness", "button", "switch", "session", "video", "logs", "color", "temperature"
+    }
+
+    enriched = []
+    total = len(segments)
+    for idx, seg in enumerate(segments):
+        tokens = set(tokenize_text(seg.get("text", "")))
+        actions = sorted(tokens.intersection(action_words))
+        entities = sorted(tokens.intersection(entity_words))
+        intent = infer_segment_intent(tokens)
+        semantic_topic, semantic_score, semantic_cues = infer_semantic_topic(tokens, intent, idf_map)
+
+        stage_ratio = idx / max(1, total - 1)
+        if stage_ratio < 0.34:
+            stage = "early"
+        elif stage_ratio < 0.67:
+            stage = "middle"
+        else:
+            stage = "late"
+
+        summary_parts = [semantic_topic, f"{stage} segment"]
+        if entities:
+            summary_parts.append(f"entities: {', '.join(entities[:3])}")
+        if actions:
+            summary_parts.append(f"actions: {', '.join(actions[:3])}")
+        if semantic_cues:
+            summary_parts.append(f"cues: {', '.join(semantic_cues)}")
+
+        enriched_seg = dict(seg)
+        enriched_seg["intent"] = intent
+        enriched_seg["actions"] = actions
+        enriched_seg["entities"] = entities
+        enriched_seg["stage"] = stage
+        enriched_seg["semantic_topic"] = semantic_topic
+        enriched_seg["semantic_score"] = semantic_score
+        enriched_seg["semantic_cues"] = semantic_cues
+        enriched_seg["context_summary"] = " | ".join(summary_parts)
+        enriched.append(enriched_seg)
+
+    return enriched
+
+
+def context_confidence(second, segment):
+    if second is None or not segment:
+        return 0.0
+    start = float(segment.get("start", 0.0))
+    end = float(segment.get("end", start))
+    if start <= second <= end:
+        return 1.0
+    edge_distance = min(abs(second - start), abs(second - end))
+    return max(0.0, 1.0 - min(edge_distance / 2.0, 1.0))
 
 
 def extract_stats(metadata):
@@ -170,6 +425,388 @@ def extract_stats(metadata):
     return stats
 
 
+def merge_intervals(intervals):
+    if not intervals:
+        return []
+
+    intervals = sorted(intervals, key=lambda x: x["start"])
+    merged = [intervals[0].copy()]
+
+    for current in intervals[1:]:
+        prev = merged[-1]
+        if current["start"] <= prev["end"]:
+            prev["end"] = max(prev["end"], current["end"])
+            prev["reasons"].update(current.get("reasons", set()))
+        else:
+            merged.append(current.copy())
+
+    return merged
+
+
+def build_autoedit_intervals(events, transcript_segments, duration_seconds, offset_seconds=0.0):
+    intervals = []
+    # Keep only transcript windows that are near important events.
+    for event in events or []:
+        if event.get("include_in_timeline") is False:
+            continue
+
+        base_x = event.get("x_val")
+        if base_x is None:
+            continue
+
+        try:
+            x = float(base_x) + float(offset_seconds)
+        except (TypeError, ValueError):
+            continue
+
+        if not math.isfinite(x):
+            continue
+
+        for seg in transcript_segments or []:
+            try:
+                seg_start = float(seg.get("start", 0.0))
+                seg_end = float(seg.get("end", seg_start))
+            except (TypeError, ValueError):
+                continue
+
+            if seg_end <= seg_start:
+                continue
+
+            # Keep transcript if event lands inside it or close to its edges.
+            proximity_padding = 2.0
+            if x < (seg_start - proximity_padding) or x > (seg_end + proximity_padding):
+                continue
+
+            start = max(0.0, seg_start)
+            end = min(duration_seconds, seg_end)
+            if end <= start:
+                continue
+
+            intervals.append({"start": start, "end": end, "reasons": {"transcript_near_event"}})
+
+    merged = merge_intervals(intervals)
+    compact = []
+    for item in merged:
+        compact.append({
+            "start": round(item["start"], 3),
+            "end": round(item["end"], 3),
+            "reasons": sorted(item.get("reasons", set())),
+        })
+    return compact
+
+
+def build_interval_event_contexts(intervals, events, offset_seconds=0.0):
+    enriched = []
+    for idx, interval in enumerate(intervals or [], start=1):
+        try:
+            start = float(interval.get("start", 0.0))
+            end = float(interval.get("end", start))
+        except (TypeError, ValueError):
+            continue
+
+        if end <= start:
+            continue
+
+        contexts = []
+        seen = set()
+        for event in events or []:
+            if event.get("include_in_timeline") is False:
+                continue
+
+            base_x = event.get("x_val")
+            if base_x is None:
+                continue
+
+            try:
+                event_time = float(base_x) + float(offset_seconds)
+            except (TypeError, ValueError):
+                continue
+
+            if not math.isfinite(event_time) or event_time < start or event_time > end:
+                continue
+
+            event_type = str(event.get("type", "unknown")).replace("_", " ")
+            summary = str(
+                event.get("inferred_summary")
+                or event.get("inferred_topic")
+                or event.get("description")
+                or "context unavailable"
+            ).strip()
+
+            dedupe_key = (
+                event.get("index"),
+                round(event_time, 3),
+                event_type,
+                summary,
+            )
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+
+            contexts.append({
+                "event_index": event.get("index"),
+                "event_time": round(event_time, 3),
+                "event_type": event_type,
+                "summary": summary,
+            })
+
+        enriched.append({
+            "segment_id": idx,
+            "start": round(start, 3),
+            "end": round(end, 3),
+            "reasons": interval.get("reasons", []),
+            "event_count": len(contexts),
+            "event_contexts": contexts,
+        })
+
+    return enriched
+
+
+def write_timeline_csv(csv_path, interval_contexts):
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "segment_id",
+            "start_seconds",
+            "end_seconds",
+            "duration_seconds",
+            "reasons",
+            "event_count",
+            "event_context",
+        ])
+
+        for item in interval_contexts or []:
+            start = float(item.get("start", 0.0))
+            end = float(item.get("end", start))
+            contexts = item.get("event_contexts", [])
+            context_text = " | ".join(
+                f"{c.get('event_type', 'unknown')} @ {float(c.get('event_time', 0.0)):.3f}s: {c.get('summary', '')}"
+                for c in contexts
+            )
+            writer.writerow([
+                item.get("segment_id"),
+                round(start, 3),
+                round(end, 3),
+                round(max(0.0, end - start), 3),
+                " + ".join(item.get("reasons", [])),
+                item.get("event_count", 0),
+                context_text,
+            ])
+
+
+def write_elan_file(eaf_path, media_filename, interval_contexts):
+    root = ET.Element(
+        "ANNOTATION_DOCUMENT",
+        {
+            "AUTHOR": "",
+            "DATE": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "FORMAT": "3.0",
+            "VERSION": "3.0",
+        },
+    )
+
+    header = ET.SubElement(root, "HEADER", {"MEDIA_FILE": "", "TIME_UNITS": "milliseconds"})
+    ET.SubElement(
+        header,
+        "MEDIA_DESCRIPTOR",
+        {
+            "MEDIA_URL": f"file://{media_filename}",
+            "MIME_TYPE": "video/mp4",
+            "RELATIVE_MEDIA_URL": media_filename,
+        },
+    )
+    ET.SubElement(header, "PROPERTY", {"NAME": "auto_edit_export"}).text = "EventSync auto-edit timeline"
+
+    times_ms = set()
+    for item in interval_contexts or []:
+        start_ms = max(0, int(round(float(item.get("start", 0.0)) * 1000)))
+        end_ms = max(start_ms + 1, int(round(float(item.get("end", 0.0)) * 1000)))
+        times_ms.add(start_ms)
+        times_ms.add(end_ms)
+
+    time_order = ET.SubElement(root, "TIME_ORDER")
+    slot_by_time = {}
+    for idx, t in enumerate(sorted(times_ms), start=1):
+        slot_id = f"ts{idx}"
+        slot_by_time[t] = slot_id
+        ET.SubElement(time_order, "TIME_SLOT", {"TIME_SLOT_ID": slot_id, "TIME_VALUE": str(t)})
+
+    tier = ET.SubElement(
+        root,
+        "TIER",
+        {
+            "LINGUISTIC_TYPE_REF": "default-lt",
+            "TIER_ID": "AutoEditTimeline",
+        },
+    )
+
+    for idx, item in enumerate(interval_contexts or [], start=1):
+        start_ms = max(0, int(round(float(item.get("start", 0.0)) * 1000)))
+        end_ms = max(start_ms + 1, int(round(float(item.get("end", 0.0)) * 1000)))
+        ann = ET.SubElement(tier, "ANNOTATION")
+        alignable = ET.SubElement(
+            ann,
+            "ALIGNABLE_ANNOTATION",
+            {
+                "ANNOTATION_ID": f"a{idx}",
+                "TIME_SLOT_REF1": slot_by_time[start_ms],
+                "TIME_SLOT_REF2": slot_by_time[end_ms],
+            },
+        )
+
+        contexts = item.get("event_contexts", [])
+        context_text = "; ".join(
+            f"{c.get('event_type', 'unknown')} @ {float(c.get('event_time', 0.0)):.2f}s: {c.get('summary', '')}"
+            for c in contexts
+        )
+        if not context_text:
+            context_text = "No matched event context"
+
+        reasons = " + ".join(item.get("reasons", [])) or "keep"
+        ET.SubElement(alignable, "ANNOTATION_VALUE").text = (
+            f"[{item.get('start', 0.0):.3f}s-{item.get('end', 0.0):.3f}s] "
+            f"reasons={reasons}; context={context_text}"
+        )
+
+    ET.SubElement(root, "LINGUISTIC_TYPE", {
+        "GRAPHIC_REFERENCES": "false",
+        "LINGUISTIC_TYPE_ID": "default-lt",
+        "TIME_ALIGNABLE": "true",
+    })
+
+    ET.SubElement(root, "LOCALE", {"COUNTRY_CODE": "US", "LANGUAGE_CODE": "en"})
+    ET.SubElement(root, "CONSTRAINT", {
+        "DESCRIPTION": "Time subdivision of parent annotation's time interval, no time gaps allowed within this interval",
+        "STEREOTYPE": "Time_Subdivision",
+    })
+    ET.SubElement(root, "CONSTRAINT", {
+        "DESCRIPTION": "Symbolic subdivision of a parent annotation. Annotations refering to the same parent are ordered",
+        "STEREOTYPE": "Symbolic_Subdivision",
+    })
+    ET.SubElement(root, "CONSTRAINT", {
+        "DESCRIPTION": "1-1 association with a parent annotation",
+        "STEREOTYPE": "Symbolic_Association",
+    })
+    ET.SubElement(root, "CONSTRAINT", {
+        "DESCRIPTION": "Time alignable annotations within the parent annotation's time interval, gaps are allowed",
+        "STEREOTYPE": "Included_In",
+    })
+
+    tree = ET.ElementTree(root)
+    if hasattr(ET, "indent"):
+        ET.indent(tree, space="  ")
+    tree.write(eaf_path, encoding="utf-8", xml_declaration=True)
+
+
+def make_subclip(clip, start_time, end_time):
+    """Compatibility wrapper for MoviePy 1.x/2.x clip slicing APIs."""
+    if hasattr(clip, "subclip"):
+        return clip.subclip(start_time, end_time)
+    if hasattr(clip, "subclipped"):
+        return clip.subclipped(start_time, end_time)
+    raise AttributeError("No compatible subclip API found on VideoFileClip")
+
+
+@app.route("/api/available-logs", methods=["GET"])
+def api_available_logs():
+    """Return list of available JSON/JSONL files from logs folder."""
+    return jsonify(get_available_logs())
+
+
+@app.route("/api/auto-edit", methods=["POST"])
+def api_auto_edit():
+    payload = request.get_json(silent=True) or {}
+    video_url = str(payload.get("video_url", "")).strip()
+    events = payload.get("events", [])
+    transcript_segments = payload.get("transcript_segments", [])
+    offset_seconds = float(payload.get("offset_seconds", 0.0) or 0.0)
+
+    if not video_url.startswith("/static/uploads/"):
+        return jsonify({"error": "Invalid video URL."}), 400
+
+    video_name = Path(video_url.replace("/static/uploads/", "")).name
+    video_path = UPLOAD_FOLDER / video_name
+    if not video_path.exists():
+        return jsonify({"error": "Source video not found."}), 404
+
+    try:
+        src_clip = VideoFileClip(str(video_path))
+        duration_seconds = float(src_clip.duration or 0.0)
+        if duration_seconds <= 0:
+            src_clip.close()
+            return jsonify({"error": "Video has invalid duration."}), 400
+
+        intervals = build_autoedit_intervals(events, transcript_segments, duration_seconds, offset_seconds)
+        if not intervals:
+            src_clip.close()
+            return jsonify({"error": "No keep intervals generated."}), 400
+
+        parts = []
+        for seg in intervals:
+            if seg["end"] - seg["start"] < 0.1:
+                continue
+            parts.append(make_subclip(src_clip, seg["start"], seg["end"]))
+
+        if not parts:
+            src_clip.close()
+            return jsonify({"error": "No valid intervals to export."}), 400
+
+        out_name = f"autoedit_{Path(video_name).stem}_{int(time.time())}.mp4"
+        out_path = UPLOAD_FOLDER / out_name
+
+        final_clip = concatenate_videoclips(parts, method="compose")
+        src_fps = getattr(src_clip, "fps", None) or 24
+        write_kwargs = {
+            "codec": "libx264",
+            "logger": None,
+            "fps": src_fps,
+        }
+        if final_clip.audio is not None:
+            write_kwargs["audio_codec"] = "aac"
+        else:
+            write_kwargs["audio"] = False
+        final_clip.write_videofile(str(out_path), **write_kwargs)
+
+        kept_duration = round(sum(seg["end"] - seg["start"] for seg in intervals), 3)
+
+        interval_contexts = build_interval_event_contexts(intervals, events, offset_seconds)
+
+        export_stem = Path(out_name).stem
+        csv_name = f"{export_stem}_timeline.csv"
+        eaf_name = f"{export_stem}.eaf"
+        zip_name = f"{export_stem}_elan_package.zip"
+
+        csv_path = UPLOAD_FOLDER / csv_name
+        eaf_path = UPLOAD_FOLDER / eaf_name
+        zip_path = UPLOAD_FOLDER / zip_name
+
+        write_timeline_csv(csv_path, interval_contexts)
+        write_elan_file(eaf_path, out_name, interval_contexts)
+
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.write(out_path, arcname=out_name)
+            zf.write(csv_path, arcname=csv_name)
+            zf.write(eaf_path, arcname=eaf_name)
+
+        final_clip.close()
+        for part in parts:
+            part.close()
+        src_clip.close()
+
+        return jsonify({
+            "output_url": f"{url_for('static', filename=f'uploads/{out_name}')}?v={int(time.time())}",
+            "intervals": intervals,
+            "interval_annotations": interval_contexts,
+            "kept_duration": kept_duration,
+            "source_duration": round(duration_seconds, 3),
+            "timeline_csv_url": f"{url_for('static', filename=f'uploads/{csv_name}')}?v={int(time.time())}",
+            "elan_url": f"{url_for('static', filename=f'uploads/{eaf_name}')}?v={int(time.time())}",
+            "package_url": f"{url_for('static', filename=f'uploads/{zip_name}')}?v={int(time.time())}",
+        })
+    except Exception as exc:
+        return jsonify({"error": f"Auto-edit failed: {exc}"}), 500
+
+
 @app.route("/", methods=["GET", "POST"])
 def upload_page():
     if request.method == "POST":
@@ -179,13 +816,14 @@ def upload_page():
 
         video_file = request.files["video_file"]
         json_file = request.files.get("json_file")
-        use_json_file = json_file is not None and json_file.filename != ""
+        quick_select_file = request.form.get("quick_select_file", "")
+        use_json_file = (json_file is not None and json_file.filename != "") or quick_select_file != ""
 
         if video_file.filename == "":
             flash("No video file selected.")
             return redirect(request.url)
 
-        if use_json_file and not allowed_file(json_file.filename, ALLOWED_JSON_EXTENSIONS):
+        if use_json_file and not quick_select_file and not allowed_file(json_file.filename, ALLOWED_JSON_EXTENSIONS):
             flash("Invalid JSON file extension")
             return redirect(request.url)
 
@@ -213,14 +851,27 @@ def upload_page():
             generated_metadata = generate_jsonl_from_video(str(video_path))
             raw_jsonl_lines = [json.dumps(record) for record in generated_metadata]
             transcript_segments = extract_transcript_segments(generated_metadata)
+            transcript_segments = enrich_transcript_segments(transcript_segments)
+            video_duration_seconds = extract_video_duration_seconds(generated_metadata)
+            video_creation_datetime = extract_video_creation_datetime(generated_metadata)
         except Exception as e:
             flash(f"Failed to generate metadata from video: {e}")
             return redirect(request.url)
 
         if use_json_file:
-            json_filename = secure_filename(json_file.filename)
-            json_path = UPLOAD_FOLDER / json_filename
-            json_file.save(json_path)
+            if quick_select_file:
+                # Handle quick-select file from logs folder
+                json_path = Path(quick_select_file)
+                if not json_path.exists() or not json_path.is_file():
+                    flash("Selected log file not found.")
+                    return redirect(request.url)
+                json_filename = json_path.name
+            else:
+                # Handle uploaded file
+                json_filename = secure_filename(json_file.filename)
+                json_path = UPLOAD_FOLDER / json_filename
+                json_file.save(json_path)
+            
             try:
                 with open(json_path, "r", encoding="utf-8") as f:
                     if json_filename.lower().endswith(".jsonl"):
@@ -244,12 +895,13 @@ def upload_page():
                 ts = event.get("timestamp")
                 tsecs = None
                 time_text = "n/a"
+                event_dt = None
                 if ts:
                     try:
                         # RFC3339-compatible datetime parse
-                        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                        tsecs = dt.timestamp()
-                        time_text = dt.strftime("%Y-%m-%d %H:%M:%S")
+                        event_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                        tsecs = event_dt.timestamp()
+                        time_text = event_dt.strftime("%Y-%m-%d %H:%M:%S")
                     except Exception:
                         tsecs = None
                 elif "start" in event:
@@ -278,6 +930,7 @@ def upload_page():
                     "timestamp": ts,
                     "time_text": time_text,
                     "tsecs": tsecs,
+                    "event_dt": event_dt.isoformat() if event_dt else None,
                     "type": readable_type,
                     "description": description,
                     "details": details,
@@ -285,9 +938,32 @@ def upload_page():
                 })
 
             base = min((ev["tsecs"] for ev in event_list if ev["tsecs"] is not None), default=None)
+            creation_epoch = video_creation_datetime.timestamp() if video_creation_datetime else None
+            clip_start_epoch, clip_end_epoch, clip_window_mode = choose_clip_window(
+                event_list,
+                video_creation_datetime,
+                video_duration_seconds,
+            )
             for ev in event_list:
-                x_val = ev["tsecs"] - base if (base is not None and ev["tsecs"] is not None) else ev["index"]
-                ev["x_val"] = x_val
+                if base is not None and ev["tsecs"] is not None:
+                    ev["relative_secs"] = max(0.0, ev["tsecs"] - base)
+                else:
+                    ev["relative_secs"] = float(ev["index"])
+
+            for ev in event_list:
+                if clip_start_epoch is not None and ev["tsecs"] is not None:
+                    # True-time alignment: event offset from inferred clip start.
+                    ev["x_val"] = ev["tsecs"] - clip_start_epoch
+                    ev["timeline_basis"] = clip_window_mode
+                    ev["in_clip_window"] = clip_start_epoch <= ev["tsecs"] <= clip_end_epoch
+                elif creation_epoch is not None and ev["tsecs"] is not None:
+                    ev["x_val"] = ev["tsecs"] - creation_epoch
+                    ev["timeline_basis"] = "creation_only"
+                    ev["in_clip_window"] = None
+                else:
+                    ev["x_val"] = ev["relative_secs"]
+                    ev["timeline_basis"] = "relative"
+                    ev["in_clip_window"] = None
 
             # Link each event to nearby spoken transcript context.
             for ev in event_list:
@@ -295,11 +971,82 @@ def upload_page():
                 if not matched_segment:
                     continue
 
-                inferred_topic = shorten_topic(matched_segment["text"])
+                inferred_topic = matched_segment.get("semantic_topic") or shorten_topic(matched_segment["text"])
+                inferred_intent = matched_segment.get("intent", "narration")
+                inferred_actions = matched_segment.get("actions", [])
+                inferred_entities = matched_segment.get("entities", [])
+                inferred_stage = matched_segment.get("stage", "unknown")
+                inferred_summary = matched_segment.get("context_summary", inferred_topic)
+                inferred_semantic_score = matched_segment.get("semantic_score", 0.0)
+                inferred_semantic_cues = matched_segment.get("semantic_cues", [])
+                inferred_confidence = context_confidence(ev.get("x_val"), matched_segment)
                 ev["inferred_topic"] = inferred_topic
                 ev["inferred_transcript"] = matched_segment["text"]
                 ev["inferred_window"] = f"{matched_segment['start']:.2f}s - {matched_segment['end']:.2f}s"
-                ev["description"] = f"{ev['description']} | Context: {inferred_topic}"
+                ev["inferred_intent"] = inferred_intent
+                ev["inferred_actions"] = inferred_actions
+                ev["inferred_entities"] = inferred_entities
+                ev["inferred_stage"] = inferred_stage
+                ev["inferred_summary"] = inferred_summary
+                ev["inferred_semantic_score"] = inferred_semantic_score
+                ev["inferred_semantic_cues"] = inferred_semantic_cues
+                ev["inferred_confidence"] = round(inferred_confidence, 3)
+                ev["description"] = f"{ev['description']} | Context: {inferred_summary}"
+                ev.setdefault("details", []).extend([
+                    f"context_intent: {inferred_intent}",
+                    f"context_stage: {inferred_stage}",
+                    f"context_entities: {', '.join(inferred_entities) if inferred_entities else 'none'}",
+                    f"context_actions: {', '.join(inferred_actions) if inferred_actions else 'none'}",
+                    f"context_semantic_score: {inferred_semantic_score:.3f}",
+                    f"context_semantic_cues: {', '.join(inferred_semantic_cues) if inferred_semantic_cues else 'none'}",
+                    f"context_confidence: {ev['inferred_confidence']:.3f}",
+                ])
+
+            # Add a mini event at the start of every transcript segment.
+            next_index = max((ev.get("index", -1) for ev in event_list), default=-1) + 1
+            for seg in transcript_segments:
+                seg_start = float(seg.get("start", 0.0))
+                seg_end = float(seg.get("end", seg_start))
+                seg_text = str(seg.get("text", "")).strip()
+                topic = shorten_topic(seg_text) if seg_text else "Transcript start"
+
+                event_list.append({
+                    "index": next_index,
+                    "timestamp": None,
+                    "time_text": f"{seg_start:.2f}s",
+                    "tsecs": seg_start,
+                    "event_dt": None,
+                    "type": "transcript_start",
+                    "description": f"Transcript Start: {topic}",
+                    "details": [
+                        f"start: {seg_start:.2f}s",
+                        f"end: {seg_end:.2f}s",
+                    ],
+                    "payload": {
+                        "field": "Transcript Segment",
+                        "start": seg_start,
+                        "end": seg_end,
+                        "text": seg_text,
+                    },
+                    "relative_secs": seg_start,
+                    "x_val": seg_start,
+                    "timeline_basis": "transcript_start",
+                    "in_clip_window": None,
+                    "inferred_topic": topic,
+                    "inferred_transcript": seg_text,
+                    "inferred_window": f"{seg_start:.2f}s - {seg_end:.2f}s",
+                    "inferred_intent": seg.get("intent", "narration"),
+                    "inferred_actions": seg.get("actions", []),
+                    "inferred_entities": seg.get("entities", []),
+                    "inferred_stage": seg.get("stage", "unknown"),
+                    "inferred_summary": seg.get("context_summary", topic),
+                    "inferred_semantic_score": seg.get("semantic_score", 0.0),
+                    "inferred_semantic_cues": seg.get("semantic_cues", []),
+                    "inferred_confidence": 1.0,
+                    "is_mini_event": True,
+                    "include_in_timeline": False,
+                })
+                next_index += 1
 
         return render_template(
             "index.html",
@@ -307,12 +1054,30 @@ def upload_page():
             raw_jsonl_lines=raw_jsonl_lines,
             stats=stats,
             events=event_list,
+            transcript_segments=transcript_segments,
             video_url=url_for("static", filename=f"uploads/{video_filename}"),
             video_type=video_type,
             json_filename=json_filename,
+            video_duration_seconds=video_duration_seconds,
+            video_creation_datetime=(video_creation_datetime.isoformat() if video_creation_datetime else None),
+            clip_start_epoch=clip_start_epoch,
+            clip_end_epoch=clip_end_epoch,
+            clip_window_mode=clip_window_mode,
         )
 
-    return render_template("index.html", events=[], stats=[], metadata=None, raw_jsonl_lines=[])
+    return render_template(
+        "index.html",
+        events=[],
+        stats=[],
+        metadata=None,
+        raw_jsonl_lines=[],
+        transcript_segments=[],
+        video_duration_seconds=None,
+        video_creation_datetime=None,
+        clip_start_epoch=None,
+        clip_end_epoch=None,
+        clip_window_mode=None,
+    )
 
 
 if __name__ == "__main__":

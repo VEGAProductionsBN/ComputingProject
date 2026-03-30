@@ -1,0 +1,7 @@
+{"timestamp": "2026-03-26T15:03:37.008267", "type": "tapo_p110_change", "entity_id": "switch.tapo_P110", "state": "off", "last_changed": "2026-03-26T14:57:40.752834+00:00", "attributes": {"friendly_name": "Tapo P110"}}
+{"timestamp": "2026-03-26T15:03:37.009571", "type": "light_change", "brightness": 255, "color": "Color Temp: 3953K", "last_changed": "2026-03-26T14:34:58.867122+00:00"}
+{"timestamp": "2026-03-26T15:03:37.010241", "type": "flic_press", "state": "on", "last_changed": "2026-03-26T14:35:10.071220+00:00", "attributes": {"address": "80:e4:da:79:f7:12", "friendly_name": "flic_80e4da79f712"}}
+{"timestamp": "2026-03-26T15:03:48.983836", "type": "light_change", "brightness": 255, "color": "Color Temp: 5003K", "last_changed": "2026-03-26T14:34:58.867122+00:00"}
+{"timestamp": "2026-03-26T15:03:50.212085", "type": "light_change", "brightness": 255, "color": "Color Temp: 6535K", "last_changed": "2026-03-26T14:34:58.867122+00:00"}
+{"timestamp": "2026-03-26T15:03:51.439374", "type": "light_change", "brightness": 255, "color": "Color Temp: 3510K", "last_changed": "2026-03-26T14:34:58.867122+00:00"}
+{"timestamp": "2026-03-26T15:15:34.618264", "type": "tapo_p110_change", "entity_id": "switch.tapo_P110", "state": "on", "last_changed": "2026-03-26T15:15:35.372712+00:00", "attributes": {"friendly_name": "Tapo P110"}}
